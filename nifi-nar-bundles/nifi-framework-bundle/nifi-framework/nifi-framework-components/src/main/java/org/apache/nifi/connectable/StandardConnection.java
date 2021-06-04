@@ -84,7 +84,9 @@ public final class StandardConnection implements Connection, ConnectionEventList
         relationships = new AtomicReference<>(Collections.unmodifiableCollection(builder.relationships));
         scheduler = builder.scheduler;
 
-        flowFileQueue = builder.flowFileQueueFactory.createFlowFileQueue(LoadBalanceStrategy.DO_NOT_LOAD_BALANCE, null, this, processGroup.get());
+        flowFileQueue = builder.flowFileQueueFactory.createFlowFileQueue(LoadBalanceStrategy.DO_NOT_LOAD_BALANCE, null, this,
+                destination.get().getProcessGroup().getDefaultFlowFileExpiration(), destination.get().getProcessGroup().getDefaultBackPressureObjectThreshold(),
+                destination.get().getProcessGroup().getDefaultBackPressureDataSizeThreshold());
         hashCode = new HashCodeBuilder(7, 67).append(id).toHashCode();
     }
 

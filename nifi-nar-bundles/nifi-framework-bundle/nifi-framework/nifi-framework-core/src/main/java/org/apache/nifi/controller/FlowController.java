@@ -1958,20 +1958,20 @@ public class FlowController implements ReportingTaskProvider, Authorizable, Node
         final FlowFileQueueFactory flowFileQueueFactory = new FlowFileQueueFactory() {
             @Override
             public FlowFileQueue createFlowFileQueue(final LoadBalanceStrategy loadBalanceStrategy, final String partitioningAttribute, final ConnectionEventListener eventListener,
-                                                     final ProcessGroup processGroup) {
+                                                     final String flowFileExpiration, final Long defaultBackPressureObjectThreshold, final String defaultBackPressureDataSizeThreshold) {
                 final FlowFileQueue flowFileQueue;
 
                 if (clusterCoordinator == null) {
                     flowFileQueue = new StandardFlowFileQueue(id, eventListener, flowFileRepository, provenanceRepository, resourceClaimManager, processScheduler, swapManager,
                             eventReporter, nifiProperties.getQueueSwapThreshold(),
-                            processGroup.getDefaultFlowFileExpiration(), processGroup.getDefaultBackPressureObjectThreshold(), processGroup.getDefaultBackPressureDataSizeThreshold());
+                            flowFileExpiration, defaultBackPressureObjectThreshold, defaultBackPressureDataSizeThreshold);
                 } else {
                     flowFileQueue = new SocketLoadBalancedFlowFileQueue(id, eventListener, processScheduler, flowFileRepository, provenanceRepository, contentRepository, resourceClaimManager,
                             clusterCoordinator, loadBalanceClientRegistry, swapManager, nifiProperties.getQueueSwapThreshold(), eventReporter);
 
-                    flowFileQueue.setFlowFileExpiration(processGroup.getDefaultFlowFileExpiration());
-                    flowFileQueue.setBackPressureObjectThreshold(processGroup.getDefaultBackPressureObjectThreshold());
-                    flowFileQueue.setBackPressureDataSizeThreshold(processGroup.getDefaultBackPressureDataSizeThreshold());
+                    flowFileQueue.setFlowFileExpiration(flowFileExpiration);
+                    flowFileQueue.setBackPressureObjectThreshold(defaultBackPressureObjectThreshold);
+                    flowFileQueue.setBackPressureDataSizeThreshold(defaultBackPressureDataSizeThreshold);
                 }
 
                 return flowFileQueue;

@@ -377,11 +377,11 @@ public class FrameworkIntegrationTest {
         FileUtils.deleteFile(dir, true);
     }
 
-    protected FlowFileQueue createFlowFileQueue(final String uuid, final ProcessGroup processGroup) {
+    protected FlowFileQueue createFlowFileQueue(final String uuid, final String flowFileExpiration, final Long defaultBackPressureObjectThreshold, final String defaultBackPressureDataSizeThreshold) {
         final RepositoryContext repoContext = getRepositoryContext();
         return new StandardFlowFileQueue(uuid, ConnectionEventListener.NOP_EVENT_LISTENER, repoContext.getFlowFileRepository(), repoContext.getProvenanceRepository(),
             resourceClaimManager, processScheduler, flowFileSwapManager, flowController.createEventReporter(), 20000,
-                processGroup.getDefaultFlowFileExpiration(), processGroup.getDefaultBackPressureObjectThreshold(), processGroup.getDefaultBackPressureDataSizeThreshold());
+                flowFileExpiration, defaultBackPressureObjectThreshold, defaultBackPressureDataSizeThreshold);
     }
 
     protected final ProcessorNode createProcessorNode(final Class<? extends Processor> processorType) {
@@ -482,7 +482,8 @@ public class FrameworkIntegrationTest {
                 .relationships(relationships)
                 .id(id)
                 .clustered(false)
-                .flowFileQueueFactory((loadBalanceStrategy, partitioningAttribute, eventListener, processGroup1) -> createFlowFileQueue(id, processGroup))
+                .flowFileQueueFactory((loadBalanceStrategy, partitioningAttribute, eventListener, flowFileExpiration, defaultBackPressureObjectThreshold, defaultBackPressureDataSizeThresshold)
+                        -> createFlowFileQueue(id, flowFileExpiration, defaultBackPressureObjectThreshold, defaultBackPressureDataSizeThresshold))
                 .build();
 
         source.addConnection(connection);
