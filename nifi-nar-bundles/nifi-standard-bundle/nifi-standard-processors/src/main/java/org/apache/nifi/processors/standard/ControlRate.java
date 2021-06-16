@@ -16,6 +16,7 @@
  */
 package org.apache.nifi.processors.standard;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -43,6 +44,9 @@ import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.ValidationContext;
 import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.components.Validator;
+import org.apache.nifi.components.state.Scope;
+import org.apache.nifi.components.state.StateManager;
+import org.apache.nifi.components.state.StateMap;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.logging.ComponentLog;
@@ -77,6 +81,8 @@ public class ControlRate extends AbstractProcessor {
             "Rate is controlled by counting flowfiles transferred per time duration");
     public static final AllowableValue ATTRIBUTE_RATE_VALUE = new AllowableValue(ATTRIBUTE_RATE, ATTRIBUTE_RATE,
             "Rate is controlled by accumulating the value of a specified attribute that is transferred per time duration");
+    public static final AllowableValue SCOPE_NODE = new AllowableValue("node", "node", "Rate calculated on node only");
+    public static final AllowableValue SCOPE_CLUSTER = new AllowableValue("cluster", "cluster", "Rate calculated by accumulating across cluster");
 
     // based on testing to balance commits and 10,000 FF swap limit
     public static final int MAX_FLOW_FILES_PER_BATCH = 1000;
@@ -119,6 +125,18 @@ public class ControlRate extends AbstractProcessor {
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .build();
+    public static final PropertyDescriptor RATE_SCOPE = new PropertyDescriptor.Builder()
+            .name("Rate Scope")
+            .displayName("Rate Scope")
+            .description("Specify the scope of how the limiting rate is determined: single-node or cluster-wide. For 'node', the rate is determined " +
+                    "separately on each node. For 'cluster', the rate is determined by accumulating rates across all nodes in the cluster. " +
+                    "If NiFi is running as standalone mode, the only valid setting is 'node'; even if set for 'cluster', behavior defaults to 'node' when " +
+                    "not actually part of a cluster, e.g. Node has been removed from a cluster. In such cases, every flowfile processed by this processor " +
+                    "will generate a warning.")
+            .required(true)
+            .allowableValues(SCOPE_NODE, SCOPE_CLUSTER)
+            .defaultValue(SCOPE_NODE.getValue())
+            .build();
 
     public static final Relationship REL_SUCCESS = new Relationship.Builder()
             .name("success")
@@ -151,6 +169,7 @@ public class ControlRate extends AbstractProcessor {
         properties.add(RATE_CONTROL_ATTRIBUTE_NAME);
         properties.add(TIME_PERIOD);
         properties.add(GROUPING_ATTRIBUTE_NAME);
+        properties.add(RATE_SCOPE);
         this.properties = Collections.unmodifiableList(properties);
 
         final Set<Relationship> relationships = new HashSet<>();
@@ -237,11 +256,18 @@ public class ControlRate extends AbstractProcessor {
 
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
-        List<FlowFile> flowFiles = session.get(new ThrottleFilter(MAX_FLOW_FILES_PER_BATCH));
+        List<FlowFile> flowFiles = session.get(new ThrottleFilter(MAX_FLOW_FILES_PER_BATCH, isClusterScope(context), context.getStateManager()));
         if (flowFiles.isEmpty()) {
             context.yield();
             return;
         }
+
+//        // Determine scope defaulting to 'node' if configured for cluster, but not currently connected to a cluster
+//        final boolean nodeScope = !context.isConnectedToCluster() || SCOPE_NODE.getValue().equals(context.getProperty(RATE_SCOPE).getValue());
+//        if (nodeScope && SCOPE_CLUSTER.getValue().equals(context.getProperty(RATE_SCOPE).getValue())) {
+//            getLogger().warn("Configured for '" + SCOPE_CLUSTER.getValue() + "' but not currently connected to a cluster. Behavior defaulting to '" +
+//                    SCOPE_NODE + "', and still using rate settings provided for a cluster configuration.");
+//        }
 
         // Periodically clear any Throttle that has not been used in more than 2 throttling periods
         final long lastClearTime = lastThrottleClearTime.get();
@@ -310,21 +336,37 @@ public class ControlRate extends AbstractProcessor {
         return rateValue;
     }
 
+    private boolean isClusterScope(final ProcessContext context) { //}, boolean logInvalidConfig) {
+        if (SCOPE_CLUSTER.equals(context.getProperty(RATE_SCOPE).getValue())) {
+            if (getNodeTypeProvider().isConfiguredForClustering()) {
+                return true;
+            }
+//            if (logInvalidConfig) {
+                getLogger().warn("NiFi is running as a Standalone mode, but 'cluster' scope is set." +
+                        " Fallback to 'node' scope. Fix configuration to stop this message.");
+//            }
+        }
+        return false;
+    }
+
+
     private static class Throttle extends ReentrantLock {
 
         private final AtomicLong maxRate = new AtomicLong(1L);
         private final long timePeriodMillis;
         private final TimedBuffer<TimestampedLong> timedBuffer;
         private final ComponentLog logger;
+        private final StateManager stateManager;
 
         private volatile long penalizationPeriod = 0;
         private volatile long penalizationExpired = 0;
         private volatile long lastUpdateTime;
 
-        public Throttle(final int timePeriod, final TimeUnit unit, final ComponentLog logger) {
+        public Throttle(final int timePeriod, final TimeUnit unit, final ComponentLog logger, final StateManager stateManager) {
             this.timePeriodMillis = TimeUnit.MILLISECONDS.convert(timePeriod, unit);
             this.timedBuffer = new TimedBuffer<>(unit, timePeriod, new LongEntityAccess());
             this.logger = logger;
+            this.stateManager = stateManager;
         }
 
         public void setMaxRate(final long maxRate) {
@@ -335,15 +377,30 @@ public class ControlRate extends AbstractProcessor {
             return lastUpdateTime;
         }
 
-        public boolean tryAdd(final long value) {
+        public boolean tryAdd(final long value, final boolean isClusterScope) {
             final long now = System.currentTimeMillis();
+            // Already penalized, and has not reached penalty expiration time
             if (penalizationExpired > now) {
                 return false;
             }
 
             final long maxRateValue = maxRate.get();
 
+            // TODO: buffer needs to account for cluster
             final TimestampedLong sum = timedBuffer.getAggregateValue(timePeriodMillis);
+            if (isClusterScope) {
+                StateMap state;
+                try {
+                    logger.debug("Getting cluster state");
+                    state = stateManager.getState(Scope.CLUSTER);
+                } catch (IOException ioe) {
+                    logger.warn("Could not retrieve cluster state information for rate calculation.");
+                    return false;
+                }
+
+                logger.debug("TODO: calculate cluster-wide sum using state version {}", state.getVersion());
+//                final TimestampedLong clusterSum = sum.getValue() + // TODO: state value
+            }
             if (sum != null && sum.getValue() >= maxRateValue) {
                 if (logger.isDebugEnabled()) {
                     logger.debug("current sum for throttle is {} at time {}, so not allowing rate of {} through", new Object[]{sum.getValue(), sum.getTimestamp(), value});
@@ -387,9 +444,13 @@ public class ControlRate extends AbstractProcessor {
 
         private final int flowFilesPerBatch;
         private int flowFilesInBatch = 0;
+        private final boolean isClusterScope;
+        private final StateManager stateManager;
 
-        ThrottleFilter(final int maxFFPerBatch) {
+        ThrottleFilter(final int maxFFPerBatch, final boolean isClusterScope, final StateManager stateManager) {
             flowFilesPerBatch = maxFFPerBatch;
+            this.isClusterScope = isClusterScope;
+            this.stateManager = stateManager;
         }
 
         @Override
@@ -410,7 +471,7 @@ public class ControlRate extends AbstractProcessor {
 
             Throttle throttle = throttleMap.get(groupName);
             if (throttle == null) {
-                throttle = new Throttle(timePeriodSeconds, TimeUnit.SECONDS, getLogger());
+                throttle = new Throttle(timePeriodSeconds, TimeUnit.SECONDS, getLogger(), stateManager);
 
                 final long newRate;
                 if (DataUnit.DATA_SIZE_PATTERN.matcher(maximumRateStr).matches()) {
@@ -425,7 +486,7 @@ public class ControlRate extends AbstractProcessor {
 
             throttle.lock();
             try {
-                if (throttle.tryAdd(accrual)) {
+                if (throttle.tryAdd(accrual, isClusterScope)) {
                     flowFilesInBatch += 1;
                     if (flowFilesInBatch>= flowFilesPerBatch) {
                         flowFilesInBatch = 0;
