@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -357,15 +358,19 @@ public class ControlRate extends AbstractProcessor {
         private final TimedBuffer<TimestampedLong> timedBuffer;
         private final ComponentLog logger;
         private final StateManager stateManager;
+        private final boolean isClusterScope;
 
         private volatile long penalizationPeriod = 0;
         private volatile long penalizationExpired = 0;
         private volatile long lastUpdateTime;
 
-        public Throttle(final int timePeriod, final TimeUnit unit, final ComponentLog logger, final StateManager stateManager) {
+        private static final String STATE_KEY_RATE_VALUE = "ControlRate.rateValue";
+
+        public Throttle(final int timePeriod, final TimeUnit unit, final ComponentLog logger, final boolean isClusterScope, final StateManager stateManager) {
             this.timePeriodMillis = TimeUnit.MILLISECONDS.convert(timePeriod, unit);
             this.timedBuffer = new TimedBuffer<>(unit, timePeriod, new LongEntityAccess());
             this.logger = logger;
+            this.isClusterScope = isClusterScope;
             this.stateManager = stateManager;
         }
 
@@ -377,7 +382,7 @@ public class ControlRate extends AbstractProcessor {
             return lastUpdateTime;
         }
 
-        public boolean tryAdd(final long value, final boolean isClusterScope) {
+        public boolean tryAdd(final long value) {
             final long now = System.currentTimeMillis();
             // Already penalized, and has not reached penalty expiration time
             if (penalizationExpired > now) {
@@ -387,19 +392,47 @@ public class ControlRate extends AbstractProcessor {
             final long maxRateValue = maxRate.get();
 
             // TODO: buffer needs to account for cluster
-            final TimestampedLong sum = timedBuffer.getAggregateValue(timePeriodMillis);
+            final TimestampedLong sum;// = timedBuffer.getAggregateValue(timePeriodMillis);
             if (isClusterScope) {
-                StateMap state;
+//                final StateMap state;
                 try {
                     logger.debug("Getting cluster state");
-                    state = stateManager.getState(Scope.CLUSTER);
+                    // Get cluster state
+                    final StateMap state = stateManager.getState(Scope.CLUSTER);
+                    final Map<String, String> newValues = new HashMap<>();
+                    logger.debug("timePeriodMillis = {}", timePeriodMillis);
+                    logger.debug("timedBuffer = {}", timedBuffer == null ? "null" : timedBuffer);
+                    if (timedBuffer != null) {
+                        logger.debug("timedBuffer.getAggregateValue(timePeriodMillis) = {}",
+                                timedBuffer.getAggregateValue(timePeriodMillis) == null ? "null" : timedBuffer.getAggregateValue(timePeriodMillis));
+                    }
+                    long rateValue = timedBuffer.getAggregateValue(timePeriodMillis) == null ? 0L : timedBuffer.getAggregateValue(timePeriodMillis).getValue();
+                    logger.debug("rateValue = {}", rateValue);
+                    if (state == null || state.getVersion() == -1) {
+                        logger.debug("Cluster state is null or invalid version. Using local node rate only.");
+                        sum = new TimestampedLong(rateValue);
+                        newValues.put(STATE_KEY_RATE_VALUE, String.valueOf(rateValue));
+                        logger.debug("Setting cluster state with initial value for {} to {}", STATE_KEY_RATE_VALUE, rateValue);
+                        stateManager.setState(newValues, Scope.CLUSTER);
+                    } else {
+                        final long clusterRateValue = Long.parseLong(state.get(STATE_KEY_RATE_VALUE));
+//                        sum = new TimestampedLong(rateValue + clusterRateValue);
+                        timedBuffer.add(new TimestampedLong(rateValue + clusterRateValue));
+                        sum = timedBuffer.getAggregateValue(timePeriodMillis);
+
+                        // Update cluster state
+                        newValues.putAll(state.toMap());
+                        newValues.put(STATE_KEY_RATE_VALUE, String.valueOf(sum.getValue()));
+                        logger.debug("Updating cluster state for {} old value {} with new value {}", STATE_KEY_RATE_VALUE, state.get(STATE_KEY_RATE_VALUE), sum.getValue());
+                        stateManager.replace(state, newValues, Scope.CLUSTER);
+                    }
                 } catch (IOException ioe) {
-                    logger.warn("Could not retrieve cluster state information for rate calculation.");
+                    // TODO: should this cause an admin yield or penalization?
+                    logger.warn("Could not retrieve cluster state information for rate calculation. Using local node rate only.");
                     return false;
                 }
-
-                logger.debug("TODO: calculate cluster-wide sum using state version {}", state.getVersion());
-//                final TimestampedLong clusterSum = sum.getValue() + // TODO: state value
+            } else {
+                sum = timedBuffer.getAggregateValue(timePeriodMillis);
             }
             if (sum != null && sum.getValue() >= maxRateValue) {
                 if (logger.isDebugEnabled()) {
@@ -471,7 +504,7 @@ public class ControlRate extends AbstractProcessor {
 
             Throttle throttle = throttleMap.get(groupName);
             if (throttle == null) {
-                throttle = new Throttle(timePeriodSeconds, TimeUnit.SECONDS, getLogger(), stateManager);
+                throttle = new Throttle(timePeriodSeconds, TimeUnit.SECONDS, getLogger(), isClusterScope, stateManager);
 
                 final long newRate;
                 if (DataUnit.DATA_SIZE_PATTERN.matcher(maximumRateStr).matches()) {
@@ -486,7 +519,7 @@ public class ControlRate extends AbstractProcessor {
 
             throttle.lock();
             try {
-                if (throttle.tryAdd(accrual, isClusterScope)) {
+                if (throttle.tryAdd(accrual)) {
                     flowFilesInBatch += 1;
                     if (flowFilesInBatch>= flowFilesPerBatch) {
                         flowFilesInBatch = 0;
