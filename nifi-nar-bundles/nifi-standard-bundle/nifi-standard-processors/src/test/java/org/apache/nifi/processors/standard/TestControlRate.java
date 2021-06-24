@@ -19,17 +19,88 @@ package org.apache.nifi.processors.standard;
 import static org.apache.nifi.processors.standard.ControlRate.MAX_FLOW_FILES_PER_BATCH;
 import static org.junit.Assert.assertEquals;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.nifi.components.state.Scope;
+import org.apache.nifi.components.state.StateMap;
 import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestControlRate {
+
+    @Before
+    public void init() throws Exception {
+        System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "info");
+//        System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
+        System.setProperty("org.slf4j.simpleLogger.log.org.apache.nifi.processors.standard.ControlRate", "info");
+    }
+
+    @Test
+    public void testClusterFileCountRate() throws IOException, InterruptedException {
+        final TestRunner runner = TestRunners.newTestRunner(new ControlRate());
+        runner.setProperty(ControlRate.RATE_CONTROL_CRITERIA, ControlRate.FLOWFILE_RATE);
+        runner.setProperty(ControlRate.MAX_RATE, "3");
+        runner.setProperty(ControlRate.TIME_PERIOD, "1 sec");
+        runner.setProperty(ControlRate.RATE_SCOPE, ControlRate.SCOPE_CLUSTER);
+        runner.setClustered(true);
+        runner.setIsConfiguredForClustering(true);
+
+        StateMap updatedState = runner.getStateManager().getState(Scope.CLUSTER);
+//        assertEquals("1", updatedState.get(ControlRate.STATE_KEY_RATE_VALUE));
+
+        runner.enqueue("test data 1");
+        runner.enqueue("test data 2");
+        runner.enqueue("test data 3");
+        runner.enqueue("test data 4");
+
+        runner.run(4, false);
+        updatedState = runner.getStateManager().getState(Scope.CLUSTER);
+        assertEquals("3", updatedState.get(ControlRate.STATE_KEY_RATE_VALUE));
+
+        runner.assertAllFlowFilesTransferred(ControlRate.REL_SUCCESS, 3);
+        runner.clearTransferState();
+
+        runner.run(50, false);
+        runner.assertTransferCount(ControlRate.REL_SUCCESS, 0);
+        runner.assertTransferCount(ControlRate.REL_FAILURE, 0);
+        runner.assertQueueNotEmpty();
+
+        // we have sent 3 files and after 1 second, we should be able to send the 4th
+        Thread.sleep(1100L);
+        runner.run();
+        runner.assertAllFlowFilesTransferred(ControlRate.REL_SUCCESS, 1);
+        runner.assertQueueEmpty();
+
+        // new just for test
+        runner.enqueue("test data 5");
+        runner.enqueue("test data 6");
+        runner.enqueue("test data 7");
+        runner.enqueue("test data 8");
+        runner.run(4, false);
+        runner.assertAllFlowFilesTransferred(ControlRate.REL_SUCCESS, 3);
+        runner.assertQueueNotEmpty();
+        runner.clearTransferState();
+
+        runner.run(50, false);
+        runner.assertTransferCount(ControlRate.REL_SUCCESS, 0);
+        runner.assertTransferCount(ControlRate.REL_FAILURE, 0);
+        runner.assertQueueNotEmpty();
+
+        // we have sent 3 files and after 1 second, we should be able to send the 4th
+        Thread.sleep(1100L);
+        runner.run();
+        runner.assertAllFlowFilesTransferred(ControlRate.REL_SUCCESS, 2);
+        runner.assertQueueEmpty();
+
+
+    }
 
     @Test
     public void testLimitExceededThenOtherLimitNotExceeded() {

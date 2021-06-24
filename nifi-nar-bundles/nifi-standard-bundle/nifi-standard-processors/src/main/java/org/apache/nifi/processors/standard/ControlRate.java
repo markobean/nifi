@@ -36,10 +36,12 @@ import java.util.regex.Pattern;
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.InputRequirement.Requirement;
 import org.apache.nifi.annotation.behavior.SideEffectFree;
+import org.apache.nifi.annotation.behavior.Stateful;
 import org.apache.nifi.annotation.behavior.TriggerSerially;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
+import org.apache.nifi.annotation.lifecycle.OnStopped;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.ValidationContext;
@@ -71,6 +73,7 @@ import org.apache.nifi.util.timebuffer.TimestampedLong;
 @CapabilityDescription("Controls the rate at which data is transferred to follow-on processors."
         + " If you configure a very small Time Duration, then the accuracy of the throttle gets worse."
         + " You can improve this accuracy by decreasing the Yield Duration, at the expense of more Tasks given to the processor.")
+@Stateful(scopes = Scope.CLUSTER, description = "ControlRate stores the last throughput rate at each node as state so that it can examine cluster-wide rate activity.")
 public class ControlRate extends AbstractProcessor {
 
     public static final String DATA_RATE = "data rate";
@@ -150,6 +153,8 @@ public class ControlRate extends AbstractProcessor {
 
     private static final Pattern POSITIVE_LONG_PATTERN = Pattern.compile("0*[1-9][0-9]*");
     private static final String DEFAULT_GROUP_ATTRIBUTE = ControlRate.class.getName() + "###____DEFAULT_GROUP_ATTRIBUTE___###";
+    static final String STATE_KEY_RATE_VALUE = "ControlRate.rateValue";
+//    static final String STATE_KEY_TIMESTAMP = "ControlRate.timestamp";
 
     private List<PropertyDescriptor> properties;
     private Set<Relationship> relationships;
@@ -255,9 +260,19 @@ public class ControlRate extends AbstractProcessor {
         timePeriodSeconds = context.getProperty(TIME_PERIOD).asTimePeriod(TimeUnit.SECONDS).intValue();
     }
 
+    @OnStopped
+    public void onStopped(final ProcessContext context) {
+        final StateManager stateManager = context.getStateManager();
+        try {
+            stateManager.clear(Scope.CLUSTER);
+        } catch (IOException e) {
+            getLogger().error("Failed to clear cluster state due to " + e, e);
+        }
+    }
+
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
-        List<FlowFile> flowFiles = session.get(new ThrottleFilter(MAX_FLOW_FILES_PER_BATCH, isClusterScope(context), context.getStateManager()));
+        List<FlowFile> flowFiles = session.get(new ThrottleFilter(MAX_FLOW_FILES_PER_BATCH, isClusterScope(context), session));///context.getStateManager()));
         if (flowFiles.isEmpty()) {
             context.yield();
             return;
@@ -356,22 +371,25 @@ public class ControlRate extends AbstractProcessor {
         private final AtomicLong maxRate = new AtomicLong(1L);
         private final long timePeriodMillis;
         private final TimedBuffer<TimestampedLong> timedBuffer;
+        private final TimedBuffer<TimestampedLong> clusterTimedBuffer;
         private final ComponentLog logger;
-        private final StateManager stateManager;
+//        private final StateManager stateManager;
+        private final ProcessSession session;
         private final boolean isClusterScope;
 
         private volatile long penalizationPeriod = 0;
         private volatile long penalizationExpired = 0;
         private volatile long lastUpdateTime;
 
-        private static final String STATE_KEY_RATE_VALUE = "ControlRate.rateValue";
+//        static final String STATE_KEY_RATE_VALUE = "ControlRate.rateValue";
 
-        public Throttle(final int timePeriod, final TimeUnit unit, final ComponentLog logger, final boolean isClusterScope, final StateManager stateManager) {
+        public Throttle(final int timePeriod, final TimeUnit unit, final ComponentLog logger, final boolean isClusterScope, final ProcessSession session) { //final StateManager stateManager) {
             this.timePeriodMillis = TimeUnit.MILLISECONDS.convert(timePeriod, unit);
             this.timedBuffer = new TimedBuffer<>(unit, timePeriod, new LongEntityAccess());
             this.logger = logger;
             this.isClusterScope = isClusterScope;
-            this.stateManager = stateManager;
+//            this.stateManager = stateManager;
+            this.session = session;
         }
 
         public void setMaxRate(final long maxRate) {
@@ -390,50 +408,48 @@ public class ControlRate extends AbstractProcessor {
             }
 
             final long maxRateValue = maxRate.get();
+            long overallRate = value;
+//            long timestamp = 0L;
 
-            // TODO: buffer needs to account for cluster
-            final TimestampedLong sum;// = timedBuffer.getAggregateValue(timePeriodMillis);
-            if (isClusterScope) {
-//                final StateMap state;
-                try {
-                    logger.debug("Getting cluster state");
-                    // Get cluster state
-                    final StateMap state = stateManager.getState(Scope.CLUSTER);
-                    final Map<String, String> newValues = new HashMap<>();
-                    logger.debug("timePeriodMillis = {}", timePeriodMillis);
-                    logger.debug("timedBuffer = {}", timedBuffer == null ? "null" : timedBuffer);
-                    if (timedBuffer != null) {
-                        logger.debug("timedBuffer.getAggregateValue(timePeriodMillis) = {}",
-                                timedBuffer.getAggregateValue(timePeriodMillis) == null ? "null" : timedBuffer.getAggregateValue(timePeriodMillis));
+            final StateMap state;
+            final Map<String, String> newValues = new HashMap<>();
+            try {
+                state = isClusterScope ? session.getState(Scope.CLUSTER) : null;
+                if (state != null) {
+                    logger.info("Retrieved cluster state:");
+                    state.toMap().forEach((k, v) -> logger.info(" >> {}: {}", k, v));
+                    if (state.get(STATE_KEY_RATE_VALUE) != null) {
+                        overallRate += Long.parseLong(state.get(STATE_KEY_RATE_VALUE));
+                        logger.debug("incremented overallRate by {}, now at {}", state.get(STATE_KEY_RATE_VALUE), overallRate);
                     }
-                    long rateValue = timedBuffer.getAggregateValue(timePeriodMillis) == null ? 0L : timedBuffer.getAggregateValue(timePeriodMillis).getValue();
-                    logger.debug("rateValue = {}", rateValue);
-                    if (state == null || state.getVersion() == -1) {
-                        logger.debug("Cluster state is null or invalid version. Using local node rate only.");
-                        sum = new TimestampedLong(rateValue);
-                        newValues.put(STATE_KEY_RATE_VALUE, String.valueOf(rateValue));
-                        logger.debug("Setting cluster state with initial value for {} to {}", STATE_KEY_RATE_VALUE, rateValue);
-                        stateManager.setState(newValues, Scope.CLUSTER);
-                    } else {
-                        final long clusterRateValue = Long.parseLong(state.get(STATE_KEY_RATE_VALUE));
-//                        sum = new TimestampedLong(rateValue + clusterRateValue);
-                        timedBuffer.add(new TimestampedLong(rateValue + clusterRateValue));
-                        sum = timedBuffer.getAggregateValue(timePeriodMillis);
+                    // Update new values to be used for cluster state
+                    newValues.putAll(state.toMap());
+                    // TODO: Somehow need to reset cluster rate accumulator.. yet works fine without resetting! Why??
+                    newValues.put(STATE_KEY_RATE_VALUE, String.valueOf(overallRate));
+                    logger.info("newValues({}) contains {}", STATE_KEY_RATE_VALUE, newValues.get(STATE_KEY_RATE_VALUE));
+//                    if (state.get(STATE_KEY_TIMESTAMP) != null) {
+//                        timestamp = Long.parseLong(state.get(STATE_KEY_TIMESTAMP));
+//                        if (timestamp > System.currentTimeMillis() - timePeriodMillis) {
+//                            timestamp = System.currentTimeMillis();
+//                        }
+//                    }
+//                    newValues.put(STATE_KEY_TIMESTAMP, String.valueOf(timestamp));
 
-                        // Update cluster state
-                        newValues.putAll(state.toMap());
-                        newValues.put(STATE_KEY_RATE_VALUE, String.valueOf(sum.getValue()));
-                        logger.debug("Updating cluster state for {} old value {} with new value {}", STATE_KEY_RATE_VALUE, state.get(STATE_KEY_RATE_VALUE), sum.getValue());
-                        stateManager.replace(state, newValues, Scope.CLUSTER);
-                    }
-                } catch (IOException ioe) {
-                    // TODO: should this cause an admin yield or penalization?
-                    logger.warn("Could not retrieve cluster state information for rate calculation. Using local node rate only.");
-                    return false;
+                } else {
+                    logger.debug("Non-cluster configuration; no state to retrieve");
                 }
-            } else {
-                sum = timedBuffer.getAggregateValue(timePeriodMillis);
+            } catch (IOException ioe) {
+                // TODO: should this cause an admin yield or penalization?
+                logger.warn("Could not retrieve cluster state information for rate calculation. Using local node rate only.");
+                return false;
             }
+            final TimestampedLong sum = timedBuffer.getAggregateValue(timePeriodMillis);
+                if (sum == null) {
+                    logger.debug("sum is null");
+                } else {
+                    logger.debug("sum value = {}, timestamp = {}, now = {} ({} ms)", sum.getValue(), sum.getTimestamp(), System.currentTimeMillis(), System.currentTimeMillis()-sum.getTimestamp());
+                }
+
             if (sum != null && sum.getValue() >= maxRateValue) {
                 if (logger.isDebugEnabled()) {
                     logger.debug("current sum for throttle is {} at time {}, so not allowing rate of {} through", new Object[]{sum.getValue(), sum.getTimestamp(), value});
@@ -456,7 +472,9 @@ public class ControlRate extends AbstractProcessor {
                         new Object[]{sum == null ? 0 : sum.getValue(), sum == null ? 0 : sum.getTimestamp(), value});
             }
 
+//            final long transferred = timedBuffer.add(new TimestampedLong(value)).getValue();
             final long transferred = timedBuffer.add(new TimestampedLong(value)).getValue();
+            logger.debug("adding {} to timedBuffer; timedBuffer now {}", value, timedBuffer.getAggregateValue(timePeriodMillis).getValue());
             if (transferred > maxRateValue) {
                 final long amountOver = transferred - maxRateValue;
                 // determine how long it should take to transfer 'amountOver' and 'penalize' the Throttle for that long
@@ -468,6 +486,24 @@ public class ControlRate extends AbstractProcessor {
                 }
             }
 
+            if (isClusterScope) {
+                try {
+                    // TODO: is this a good place to reset the cluster state value?
+                    if (sum == null) {
+                        logger.info("sum is null; Updating cluster state using overallRate {}", overallRate);
+                    } else {
+                        logger.info("overallRate = {}", overallRate);
+                    }
+                    newValues.put(STATE_KEY_RATE_VALUE, String.valueOf(overallRate));
+                    session.replaceState(state, newValues, Scope.CLUSTER);
+                    logger.info("Updated cluster state with newValues:");
+                    newValues.forEach((k, v) -> logger.info(" >> {}: {}", k, v));
+                } catch (IOException ioe) {
+                    // TODO: should this cause an admin yield or penalization?
+                    logger.warn("Could not update cluster state information for rate calculation. Using local node rate only.");
+                    return false;
+                }
+            }
             lastUpdateTime = now;
             return true;
         }
@@ -478,12 +514,14 @@ public class ControlRate extends AbstractProcessor {
         private final int flowFilesPerBatch;
         private int flowFilesInBatch = 0;
         private final boolean isClusterScope;
-        private final StateManager stateManager;
+//        private final StateManager stateManager;
+        private final ProcessSession session;
 
-        ThrottleFilter(final int maxFFPerBatch, final boolean isClusterScope, final StateManager stateManager) {
+        ThrottleFilter(final int maxFFPerBatch, final boolean isClusterScope, final ProcessSession session ) { //final StateManager stateManager) {
             flowFilesPerBatch = maxFFPerBatch;
             this.isClusterScope = isClusterScope;
-            this.stateManager = stateManager;
+//            this.stateManager = stateManager;
+            this.session = session;
         }
 
         @Override
@@ -504,7 +542,7 @@ public class ControlRate extends AbstractProcessor {
 
             Throttle throttle = throttleMap.get(groupName);
             if (throttle == null) {
-                throttle = new Throttle(timePeriodSeconds, TimeUnit.SECONDS, getLogger(), isClusterScope, stateManager);
+                throttle = new Throttle(timePeriodSeconds, TimeUnit.SECONDS, getLogger(), isClusterScope, session);//stateManager);
 
                 final long newRate;
                 if (DataUnit.DATA_SIZE_PATTERN.matcher(maximumRateStr).matches()) {
