@@ -38,8 +38,12 @@ import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.io.InputStreamCallback;
+import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
@@ -71,10 +75,19 @@ public class ValidateXml extends AbstractProcessor {
 
     public static final PropertyDescriptor SCHEMA_FILE = new PropertyDescriptor.Builder()
             .name("Schema File")
-            .description("The path to the Schema file that is to be used for validation")
-            .required(true)
+            .displayName("Schema File")
+            .description("The path to the Schema file that is to be used for validation. If this property is blank, only XML syntax/structure will be validated.")
+            .required(false)
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .identifiesExternalResource(ResourceCardinality.SINGLE, ResourceType.FILE, ResourceType.URL)
+            .build();
+    
+    public static final PropertyDescriptor XML_SOURCE_ATTRIBUTE = new PropertyDescriptor.Builder()
+            .name("XML Source Attribute")
+            .displayName("XML Source Attribute")
+            .description("The name of the attribute containing XML to be validated. If this property is blank, the FlowFile content will be validated.")
+            .required(false)
+            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .build();
 
     public static final Relationship REL_VALID = new Relationship.Builder()
@@ -145,8 +158,18 @@ public class ValidateXml extends AbstractProcessor {
                 @Override
                 public void process(final InputStream in) throws IOException {
                     try {
-                        validator.validate(new StreamSource(in));
-                    } catch (final IllegalArgumentException | SAXException e) {
+                        if (context.getProperty(SCHEMA_FILE).evaluateAttributeExpressions().isSet()) {
+                            validator.validate(new StreamSource(in));
+                        } else {
+                            // Only verify that the XML is well-formed; no schema check
+                            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                            factory.setValidating(false);
+                            factory.setNamespaceAware(true);
+
+                            DocumentBuilder builder = factory.newDocumentBuilder();
+                            builder.parse(in);
+                        }
+                    } catch (final IllegalArgumentException | SAXException | ParserConfigurationException e) {
                         valid.set(false);
                         exception.set(e);
                     }
