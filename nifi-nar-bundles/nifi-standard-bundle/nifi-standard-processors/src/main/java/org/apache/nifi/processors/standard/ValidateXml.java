@@ -70,7 +70,9 @@ import java.util.concurrent.atomic.AtomicReference;
     @WritesAttribute(attribute = "validatexml.invalid.error", description = "If the flow file is routed to the invalid relationship "
             + "the attribute will contain the error message resulting from the validation failure.")
 })
-@CapabilityDescription("Validates the contents of FlowFiles against a user-specified XML Schema file")
+@CapabilityDescription("Validates XML contained in a FlowFile. By default, the XMl is contained in the FlowFile content. If the 'XML Source Attribute' property is set, the XML to be validated "
+        + "is contianed in the specified attribute. By default, the only validation performed is to ensure the XML is well-formed, e.g. all opening tags are properly closed. Schema validation is "
+        + "performed if the processor is configured with the XSD schema details.")
 public class ValidateXml extends AbstractProcessor {
 
     public static final String ERROR_ATTRIBUTE_KEY = "validatexml.invalid.error";
@@ -78,7 +80,7 @@ public class ValidateXml extends AbstractProcessor {
     public static final PropertyDescriptor SCHEMA_FILE = new PropertyDescriptor.Builder()
             .name("Schema File")
             .displayName("Schema File")
-            .description("The path to the Schema file that is to be used for validation. If this property is blank, only XML syntax/structure will be validated.")
+            .description("The path to the XSD Schema file that is to be used for validation. If this property is blank, only XML syntax/structure will be validated.")
             .required(false)
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .identifiesExternalResource(ResourceCardinality.SINGLE, ResourceType.FILE, ResourceType.URL)
