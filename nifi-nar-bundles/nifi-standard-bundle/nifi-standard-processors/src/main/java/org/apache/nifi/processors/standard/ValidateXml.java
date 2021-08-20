@@ -156,64 +156,72 @@ public class ValidateXml extends AbstractProcessor {
         final Schema schema = schemaRef.get();
         final Validator validator = schema == null ? null : schema.newValidator();
         final ComponentLog logger = getLogger();
+        final boolean attributeContainsXML = context.getProperty(XML_SOURCE_ATTRIBUTE).isSet();
 
         for (FlowFile flowFile : flowFiles) {
             final AtomicBoolean valid = new AtomicBoolean(true);
             final AtomicReference<Exception> exception = new AtomicReference<Exception>(null);
+            final DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setValidating(false);
+            factory.setNamespaceAware(true);
 
-            if (context.getProperty(XML_SOURCE_ATTRIBUTE).isSet()) {
-                // If XML source attribute is set, validate attribute value
-                String xml = flowFile.getAttribute(context.getProperty(XML_SOURCE_ATTRIBUTE).evaluateAttributeExpressions().getValue());
-                ByteArrayInputStream bais = new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8));
-                try {
+            try {
+                DocumentBuilder docBuilder = factory.newDocumentBuilder();
+
+                if (attributeContainsXML) {
+                    // If XML source attribute is set, validate attribute value
+                    String xml = flowFile.getAttribute(context.getProperty(XML_SOURCE_ATTRIBUTE).evaluateAttributeExpressions().getValue());
+                    ByteArrayInputStream bais = new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8));
+
                     if (validator != null) {
                         // If schema is provided, validator will be non-null
                         validator.validate(new StreamSource(bais));
                     } else {
                         // Only verify that the XML is well-formed; no schema check
-                        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                        factory.setValidating(false);
-                        factory.setNamespaceAware(true);
-
-                        DocumentBuilder builder = factory.newDocumentBuilder();
-                        builder.parse(bais);
+                        docBuilder.parse(bais);
                     }
-                } catch (final IllegalArgumentException | SAXException | ParserConfigurationException | IOException e) {
-                    valid.set(false);
-                    exception.set(e);
-                }
-            } else {
-                // If XML source attribute is not set, validate flowfile content
-                session.read(flowFile, new InputStreamCallback() {
-                    @Override
-                    public void process(final InputStream in) throws IOException {
-                        try {
-                            if (validator != null) {
-                                validator.validate(new StreamSource(in));
-                            } else {
-                                // Only verify that the XML is well-formed; no schema check
-                                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                                factory.setValidating(false);
-                                factory.setNamespaceAware(true);
-
-                                DocumentBuilder builder = factory.newDocumentBuilder();
-                                builder.parse(in);
+                } else {
+                    // If XML source attribute is not set, validate flowfile content
+                    session.read(flowFile, new InputStreamCallback() {
+                        @Override
+                        public void process(final InputStream in) throws IOException {
+                            try {
+                                if (validator != null) {
+                                    // If schema is provided, validator will be non-null
+                                    validator.validate(new StreamSource(in));
+                                } else {
+                                    // Only verify that the XML is well-formed; no schema check
+                                    docBuilder.parse(in);
+                                }
+                            } catch (final IllegalArgumentException | SAXException e) {
+                                valid.set(false);
+                                exception.set(e);
                             }
-                        } catch (final IllegalArgumentException | SAXException | ParserConfigurationException e) {
-                            valid.set(false);
-                            exception.set(e);
                         }
-                    }
-                });
+                    });
+                }
+            } catch (final IllegalArgumentException | SAXException | ParserConfigurationException | IOException e) {
+                valid.set(false);
+                exception.set(e);
             }
 
+            // determine source location of XML for logging purposes
+            String xmlSource = attributeContainsXML ? "attribute '" + context.getProperty(XML_SOURCE_ATTRIBUTE).evaluateAttributeExpressions().getValue() + "'" : "content";
             if (valid.get()) {
-                logger.debug("Successfully validated {} against schema; routing to 'valid'", new Object[]{flowFile});
+                if (context.getProperty(SCHEMA_FILE).isSet()) {
+                    logger.debug("Successfully validated XML in {} of {} against schema; routing to 'valid'", xmlSource, flowFile);
+                } else {
+                    logger.debug("Successfully validated XML is well-formed in {} of {}; routing to 'valid'", xmlSource, flowFile);
+                }
                 session.getProvenanceReporter().route(flowFile, REL_VALID);
                 session.transfer(flowFile, REL_VALID);
             } else {
                 flowFile = session.putAttribute(flowFile, ERROR_ATTRIBUTE_KEY, exception.get().getLocalizedMessage());
-                logger.info("Failed to validate {} against schema due to {}; routing to 'invalid'", new Object[]{flowFile, exception.get().getLocalizedMessage()});
+                if (context.getProperty(SCHEMA_FILE).isSet()) {
+                    logger.info("Failed to validate XML in {} of {} against schema due to {}; routing to 'invalid'", xmlSource, flowFile, exception.get().getLocalizedMessage());
+                } else {
+                    logger.info("Failed to validate XML is well-formed in {} of {} due to {}; routing to 'invalid'", xmlSource, flowFile, exception.get().getLocalizedMessage());
+                }
                 session.getProvenanceReporter().route(flowFile, REL_INVALID);
                 session.transfer(flowFile, REL_INVALID);
             }
