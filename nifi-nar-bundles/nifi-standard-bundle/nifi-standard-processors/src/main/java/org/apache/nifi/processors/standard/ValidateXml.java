@@ -38,19 +38,23 @@ import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.io.InputStreamCallback;
+import org.apache.nifi.processor.util.StandardValidators;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.Source;
 import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
 import javax.xml.validation.Validator;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -81,13 +85,13 @@ public class ValidateXml extends AbstractProcessor {
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
             .identifiesExternalResource(ResourceCardinality.SINGLE, ResourceType.FILE, ResourceType.URL)
             .build();
-    
     public static final PropertyDescriptor XML_SOURCE_ATTRIBUTE = new PropertyDescriptor.Builder()
             .name("XML Source Attribute")
             .displayName("XML Source Attribute")
             .description("The name of the attribute containing XML to be validated. If this property is blank, the FlowFile content will be validated.")
             .required(false)
             .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
+            .addValidator(StandardValidators.ATTRIBUTE_KEY_VALIDATOR)
             .build();
 
     public static final Relationship REL_VALID = new Relationship.Builder()
@@ -109,6 +113,7 @@ public class ValidateXml extends AbstractProcessor {
     protected void init(final ProcessorInitializationContext context) {
         final List<PropertyDescriptor> properties = new ArrayList<>();
         properties.add(SCHEMA_FILE);
+        properties.add(XML_SOURCE_ATTRIBUTE);
         this.properties = Collections.unmodifiableList(properties);
 
         final Set<Relationship> relationships = new HashSet<>();
@@ -130,10 +135,14 @@ public class ValidateXml extends AbstractProcessor {
     @OnScheduled
     public void parseSchema(final ProcessContext context) throws SAXException {
         try {
-            final URL url = context.getProperty(SCHEMA_FILE).evaluateAttributeExpressions().asResource().asURL();
-            final SchemaFactory schemaFactory = SchemaFactory.newInstance(SCHEMA_LANGUAGE);
-            final Schema schema = schemaFactory.newSchema(url);
-            this.schemaRef.set(schema);
+            if (context.getProperty(SCHEMA_FILE).isSet()) {
+                final URL url = context.getProperty(SCHEMA_FILE).evaluateAttributeExpressions().asResource().asURL();
+                final SchemaFactory schemaFactory = SchemaFactory.newInstance(SCHEMA_LANGUAGE);
+                final Schema schema = schemaFactory.newSchema(url);
+                schemaRef.set(schema);
+            } else {
+                schemaRef.set(null);
+            }
         } catch (final SAXException e) {
             throw e;
         }
@@ -147,34 +156,58 @@ public class ValidateXml extends AbstractProcessor {
         }
 
         final Schema schema = schemaRef.get();
-        final Validator validator = schema.newValidator();
+        final Validator validator = schema == null ? null : schema.newValidator();
         final ComponentLog logger = getLogger();
 
         for (FlowFile flowFile : flowFiles) {
             final AtomicBoolean valid = new AtomicBoolean(true);
             final AtomicReference<Exception> exception = new AtomicReference<Exception>(null);
 
-            session.read(flowFile, new InputStreamCallback() {
-                @Override
-                public void process(final InputStream in) throws IOException {
-                    try {
-                        if (context.getProperty(SCHEMA_FILE).evaluateAttributeExpressions().isSet()) {
-                            validator.validate(new StreamSource(in));
-                        } else {
-                            // Only verify that the XML is well-formed; no schema check
-                            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                            factory.setValidating(false);
-                            factory.setNamespaceAware(true);
+            if (context.getProperty(XML_SOURCE_ATTRIBUTE).isSet()) {
+                // If XML source attribute is set, validate attribute value
+                String xml = flowFile.getAttribute(context.getProperty(XML_SOURCE_ATTRIBUTE).evaluateAttributeExpressions().getValue());
+                ByteArrayInputStream bais = new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8));
+                try {
+                    if (validator != null) {
+                        // If schema is provided, validator will be non-null
+                        validator.validate(new StreamSource(bais));
+                    } else {
+                        // Only verify that the XML is well-formed; no schema check
+                        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                        factory.setValidating(false);
+                        factory.setNamespaceAware(true);
 
-                            DocumentBuilder builder = factory.newDocumentBuilder();
-                            builder.parse(in);
-                        }
-                    } catch (final IllegalArgumentException | SAXException | ParserConfigurationException e) {
-                        valid.set(false);
-                        exception.set(e);
+                        DocumentBuilder builder = factory.newDocumentBuilder();
+                        builder.parse(bais);
                     }
+                } catch (final IllegalArgumentException | SAXException | ParserConfigurationException | IOException e) {
+                    valid.set(false);
+                    exception.set(e);
                 }
-            });
+            } else {
+                // If XML source attribute is not set, validate flowfile content
+                session.read(flowFile, new InputStreamCallback() {
+                    @Override
+                    public void process(final InputStream in) throws IOException {
+                        try {
+                            if (validator != null) {
+                                validator.validate(new StreamSource(in));
+                            } else {
+                                // Only verify that the XML is well-formed; no schema check
+                                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                                factory.setValidating(false);
+                                factory.setNamespaceAware(true);
+
+                                DocumentBuilder builder = factory.newDocumentBuilder();
+                                builder.parse(in);
+                            }
+                        } catch (final IllegalArgumentException | SAXException | ParserConfigurationException e) {
+                            valid.set(false);
+                            exception.set(e);
+                        }
+                    }
+                });
+            }
 
             if (valid.get()) {
                 logger.debug("Successfully validated {} against schema; routing to 'valid'", new Object[]{flowFile});
