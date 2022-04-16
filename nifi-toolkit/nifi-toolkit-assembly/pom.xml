@@ -72,6 +72,18 @@ language governing permissions and limitations under the License. -->
             <artifactId>nifi-toolkit-encrypt-config</artifactId>
             <version>1.17.0-SNAPSHOT</version>
         </dependency>
+
+
+
+        <!-- TODO: package nifi-toolkit-encrypt-config-java is for development purposes; items should be moved to nifi-toolkit-encrypt-config when done -->
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-toolkit-encrypt-config-java</artifactId>
+            <version>1.17.0-SNAPSHOT</version>
+        </dependency>
+
+
+
         <dependency>
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-toolkit-s2s</artifactId>
