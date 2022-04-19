@@ -2,6 +2,7 @@ package org.apache.nifi.toolkit.encryptconfig;
 
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
+import org.apache.nifi.properties.scheme.StandardProtectionSchemeResolver;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,8 +23,33 @@ public class EncryptConfigTool {
 
     private static final String HELP_ARG = "help";
     private static final String VERBOSE_ARG = "verbose";
-    //    private static final String BOOTSTRAP_CONF_ARG = "bootstrapConf";
     private static final String NIFI_PROPERTIES_ARG = "niFiProperties";
+    private static final String OUTPUT_NIFI_PROPERTIES_ARG = "outputNiFiProperties";
+    private static final String LOGIN_IDENTITY_PROVIDERS_ARG = "loginIdentityProviders";
+    private static final String OUTPUT_LOGIN_IDENTITY_PROVIDERS_ARG = "outputLoginIdentityProviders";
+    private static final String AUTHORIZERS_ARG = "authorizers";
+    private static final String OUTPUT_AUTHORIZERS_ARG = "outputAuthorizers";
+    private static final String FLOW_XML_ARG = "flowXml";
+    private static final String OUTPUT_FLOW_XML_ARG = "outputFlowXml";
+    private static final String BOOTSTRAP_CONF_ARG = "bootstrapConf";
+    private static final String KEY_ARG = "key";
+    private static final String PROTECTION_SCHEME_ARG = "protectionScheme";
+    private static final String PASSWORD_ARG = "password";
+    private static final String KEY_MIGRATION_ARG = "oldKey";
+    private static final String PASSWORD_MIGRATION_ARG = "oldPassword";
+    private static final String PROTECTION_SCHEME_MIGRATION_ARG = "oldProtectionScheme";
+    private static final String USE_KEY_ARG = "useRawKey";
+    private static final String MIGRATION_ARG = "migrate";
+    private static final String PROPS_KEY_ARG = "propsKey";
+    private static final String DO_NOT_ENCRYPT_NIFI_PROPERTIES_ARG = "encryptFlowXmlOnly";
+    private static final String NEW_FLOW_ALGORITHM_ARG = "newFlowAlgorithm";
+    private static final String NEW_FLOW_PROVIDER_ARG = "newFlowProvider";
+    private static final String TRANSLATE_CLI_ARG = "translateCli";
+
+    private static final StandardProtectionSchemeResolver PROTECTION_SCHEME_RESOLVER = new StandardProtectionSchemeResolver();
+    private static final String PROTECTION_SCHEME_DESC = String.format("Selects the protection scheme for encrypted properties. Default is AES_GCM. Valid values: %s",
+            PROTECTION_SCHEME_RESOLVER.getSupportedProtectionSchemes());
+
 
     // Static holder to avoid re-generating the options object multiple times in an invocation
     private static final Options staticOptions = buildOptions();
@@ -54,17 +80,18 @@ public class EncryptConfigTool {
      * @param args the command-line arguments
      */
     static void main(List<String> args) {
-        Security.addProvider(new BouncyCastleProvider());
+//        Security.addProvider(new BouncyCastleProvider());
+        System.out.println("\n\n***  EncryptConfigTool.java: SHOULD NEVER GET HERE  ***");
 
-        EncryptConfigTool tool = new EncryptConfigTool();
+//        EncryptConfigTool tool = new EncryptConfigTool();
     }
 
-    EncryptConfigTool() {
-        this(DEFAULT_DESCRIPTION);
-    }
-
-    EncryptConfigTool(String description) {
-        header = "\n" + description + "\n\n";
-        options = getCliOptions();
-    }
+//    EncryptConfigTool() {
+//        this(DEFAULT_DESCRIPTION);
+//    }
+//
+//    EncryptConfigTool(String description) {
+//        header = "\n" + description + "\n\n";
+//        options = getCliOptions();
+//    }
 }

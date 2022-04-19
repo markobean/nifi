@@ -20,6 +20,6 @@ import java.util.List;
 
 interface ToolMode {
 
-    void run(List<String> args);
+    void run(String[] args);
 
 }

@@ -25,15 +25,11 @@ public class EncryptConfigMainJava {
 
 
     static void printUsage(String message) {
-        debugPrint("printUsage called with message: " + message);
-        if (message != null) {
+        debugPrint("printUsage called with message: '" + message + "'");
+        if (!message.isEmpty()) {
             System.out.println(message);
             System.out.println();
         }
-
-        // TODO: debug only
-        debugPrint("  ---   Detailed usage of EncryptConfigMain goes here   ---");
-        debugPrint("");
 
         String header = "\nThis tool enables easy encryption and decryption of configuration files for NiFi and its sub-projects. "
                 + "Unprotected files can be input to this tool to be protected by a key in a manner that is understood by NiFi. "
@@ -51,7 +47,7 @@ public class EncryptConfigMainJava {
 
         helpFormatter.setSyntaxPrefix(""); // disable "usage: " prefix for the following outputs
 
-        Options nifiModeOptions = EncryptConfigTool.getCliOptions(); //ConfigEncryptionTool.getCliOptions();
+        Options nifiModeOptions = NiFiMode.getCliOptions();//EncryptConfigTool.getCliOptions(); //ConfigEncryptionTool.getCliOptions();
         nifiModeOptions.addOption(null, DECRYPT_OPT, false, "TODO: add decrypt option for NiFi mode similar to NiFi Registry mode");
         helpFormatter.printHelp(
                 "When targeting NiFi:",
@@ -60,6 +56,7 @@ public class EncryptConfigMainJava {
         System.out.println();
 
         // TODO: update to java version of NiFiRegistryMode
+        System.out.println("When targeting NiFi Registry...\n");
 //        Options nifiRegistryModeOptions = NiFiRegistryMode.getCliOptions();
 //        nifiRegistryModeOptions.addOption(null, DECRYPT_OPT, false, "Can be used with -r to decrypt a previously encrypted NiFi Registry Properties file. Decrypted content is printed to STDOUT.");
 //        helpFormatter.printHelp(
@@ -70,8 +67,7 @@ public class EncryptConfigMainJava {
     }
 
     static void printUsageAndExit(int exitStatusCode) {
-        debugPrint("no message here");
-        System.exit(exitStatusCode);
+        printUsageAndExit("", exitStatusCode);
     }
 
     static void printUsageAndExit(String message, int exitStatusCode) {
@@ -96,10 +92,10 @@ public class EncryptConfigMainJava {
         }
 
         try {
-            List<String> argsList = Arrays.asList(args);
-            ToolMode toolMode = determineModeFromArgs(argsList);
+//            List<String> argsList = Arrays.asList(args);
+            ToolMode toolMode = determineModeFromArgs(Arrays.asList(args));
             if (toolMode != null) {
-                toolMode.run(argsList);
+                toolMode.run(args);
                 System.exit(EXIT_STATUS_SUCCESS);
             } else {
                 debugPrint("toolMode is null");
@@ -117,21 +113,22 @@ public class EncryptConfigMainJava {
             args.remove(NIFI_REGISTRY_FLAG);
             if (args.contains(DECRYPT_FLAG)) {
                 args.remove(DECRYPT_FLAG);
-                debugPrint("toolMode = registryDecrypt");
+                debugPrint("TBD: toolMode = registryDecrypt");
                 return null; //new NiFiRegistryDecryptMode();
             } else {
-                debugPrint("toolMode = registry");
+                debugPrint("TBD: toolMode = registry");
                 return null; //new NiFiRegistryMode();
             }
         } else {
             debugPrint("no registry flag");
             if (args.contains(DECRYPT_FLAG)) {
+                debugPrint("TBD: allow debug mode to be valid for NiFi as well as Registry");
                 logger.error("The {} flag is only available when running in {} mode and targeting nifi-registry.properties to allow for displaying plaintext values of encrypted properties.",
                         DECRYPT_FLAG, NIFI_REGISTRY_FLAG);
                 return null;
             } else {
                 debugPrint("toolMode = legacy (aka NiFI)");
-                return new LegacyMode();
+                return new NiFiMode();
             }
         }
     }
