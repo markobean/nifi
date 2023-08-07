@@ -220,7 +220,11 @@ public final class NarUnpacker {
             mapExtensions(unpackedNars, docsWorkingDir, extensionMapping);
 
             // unpack docs for the system bundle which will catch any JARs directly in the lib directory that might have docs
+            final long startTime = System.nanoTime();
             unpackBundleDocs(docsWorkingDir, extensionMapping, systemBundle.getBundleDetails().getCoordinate(), systemBundle.getBundleDetails().getWorkingDirectory());
+            final long duration = System.nanoTime() - startTime;
+            logger.info("Unpacking docs took " + duration + " nanoseconds "
+                    + "(" + (int) TimeUnit.SECONDS.convert(duration, TimeUnit.NANOSECONDS) + " seconds).");
 
             return extensionMapping;
         } catch (IOException e) {
