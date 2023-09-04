@@ -88,10 +88,10 @@ public class QuestDbNodeStatusStorage implements NodeStatusStorage {
     public StatusHistory read(final Instant start, final Instant end) {
         final SqlExecutionContext executionContext = dbContext.getSqlExecutionContext();
         final Map<Long, Map<StandardMetricDescriptor<NodeStatus>, Long>> storageMetrics = STORAGE_READING_TEMPLATE
-                .read(dbContext.getEngine(), executionContext, Arrays.asList(DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
+                .read(dbContext.getCompiler(), executionContext, Arrays.asList(DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
         final NodeStatusReadingTemplate nodeStatusReadingTemplate = new NodeStatusReadingTemplate(storageMetrics);
         final List<StatusSnapshot> snapshots = nodeStatusReadingTemplate
-                .read(dbContext.getEngine(), executionContext, Arrays.asList(DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
+                .read(dbContext.getCompiler(), executionContext, Arrays.asList(DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
         return new StandardStatusHistory(snapshots, new HashMap<>(), new Date());
     }
 

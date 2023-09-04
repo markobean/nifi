@@ -94,7 +94,7 @@ abstract class QuestDbComponentStatusStorage<T> implements ComponentStatusStorag
     @Override
     public StatusHistory read(final String componentId, final Instant start, final Instant end, final int preferredDataPoints) {
         final List<StatusSnapshot> snapshots = readingTemplate.read(
-                dbContext.getEngine(),
+                dbContext.getCompiler(),
                 dbContext.getSqlExecutionContext(),
                 Arrays.asList(getTableName(), componentId, DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
         return new StandardStatusHistory(

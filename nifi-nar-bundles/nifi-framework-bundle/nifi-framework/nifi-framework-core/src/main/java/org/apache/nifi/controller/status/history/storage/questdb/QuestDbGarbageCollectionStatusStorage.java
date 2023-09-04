@@ -70,7 +70,7 @@ public class QuestDbGarbageCollectionStatusStorage implements GarbageCollectionS
 
     @Override
     public GarbageCollectionHistory read(final Instant start, final Instant end) {
-        return READING_TEMPLATE.read(context.getEngine(), context.getSqlExecutionContext(), Arrays.asList(DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
+        return READING_TEMPLATE.read(context.getCompiler(), context.getSqlExecutionContext(), Arrays.asList(DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
     }
 
     @Override

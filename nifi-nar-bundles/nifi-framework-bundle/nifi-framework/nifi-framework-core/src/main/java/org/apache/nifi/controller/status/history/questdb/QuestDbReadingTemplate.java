@@ -53,15 +53,14 @@ abstract public class QuestDbReadingTemplate<R> {
     /**
      * Executes the query and returns with the result.
      *
-     * @param engine The database engine.
+     * @param compiler The SQL compiler.
      * @param context The execution context.
      * @param parameters Parameters (is any) in the order of appearance in the query string.
      *
      * @return End result of the query, after possible procession by {@link #processResult(RecordCursor)}
      */
-    public R read(final CairoEngine engine, final SqlExecutionContext context, final List<Object> parameters) {
+    public R read(final SqlCompiler compiler, final SqlExecutionContext context, final List<Object> parameters) {
         try (
-            final SqlCompiler compiler = new SqlCompiler(engine);
             final RecordCursorFactory factory = compiler.compile(String.format(query, parameters.toArray()), context).getRecordCursorFactory();
             final RecordCursor cursor = factory.getCursor(context);
         ) {
