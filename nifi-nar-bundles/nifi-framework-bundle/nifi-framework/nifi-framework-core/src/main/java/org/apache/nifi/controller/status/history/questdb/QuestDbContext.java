@@ -19,14 +19,17 @@ package org.apache.nifi.controller.status.history.questdb;
 import io.questdb.cairo.CairoConfiguration;
 import io.questdb.cairo.CairoEngine;
 import io.questdb.griffin.SqlCompiler;
+import io.questdb.griffin.SqlCompilerImpl;
 import io.questdb.griffin.SqlExecutionContext;
 import io.questdb.griffin.SqlExecutionContextImpl;
 
 public class QuestDbContext {
     private final CairoEngine engine;
+    private final SqlCompilerImpl compiler;
 
     public QuestDbContext(final CairoEngine engine) {
         this.engine = engine;
+        compiler = new SqlCompilerImpl(engine);
     }
 
     public CairoEngine getEngine() {
@@ -42,7 +45,7 @@ public class QuestDbContext {
     }
 
     public SqlCompiler getCompiler() {
-        return new SqlCompiler(engine);
+        return compiler;
     }
 
     public void close() {

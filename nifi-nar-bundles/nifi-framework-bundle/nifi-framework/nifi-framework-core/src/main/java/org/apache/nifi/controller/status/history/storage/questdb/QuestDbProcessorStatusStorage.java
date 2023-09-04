@@ -98,7 +98,7 @@ public class QuestDbProcessorStatusStorage implements ProcessorStatusStorage {
     @Override
     public StatusHistory read(final String componentId, final Instant start, final Instant end, final int preferredDataPoints) {
         final List<StandardStatusSnapshot> snapshots = readingTemplate.read(
-                dbContext.getEngine(),
+                dbContext.getCompiler(),
                 dbContext.getSqlExecutionContext(),
                 Arrays.asList(TABLE_NAME, componentId, DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
         return new StandardStatusHistory(
@@ -112,12 +112,12 @@ public class QuestDbProcessorStatusStorage implements ProcessorStatusStorage {
     public StatusHistory readWithCounter(final String componentId, final Instant start, final Instant end, final int preferredDataPoints) {
         final SqlExecutionContext executionContext = dbContext.getSqlExecutionContext();
         final List<StandardStatusSnapshot> snapshots = readingTemplate.read(
-                dbContext.getEngine(),
+                dbContext.getCompiler(),
                 executionContext,
                 Arrays.asList(TABLE_NAME, componentId, DATE_FORMATTER.format(start), DATE_FORMATTER.format(end)));
         final CounterReadingTemplate counterReadingTemplate = new CounterReadingTemplate(snapshots);
         final List<StatusSnapshot> enrichedSnapshots = new ArrayList<>(counterReadingTemplate.read(
-                dbContext.getEngine(),
+                dbContext.getCompiler(),
                 executionContext,
                 Arrays.asList("componentCounter", componentId, DATE_FORMATTER.format(start), DATE_FORMATTER.format(end))));
         return new StandardStatusHistory(

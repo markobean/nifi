@@ -148,9 +148,10 @@ public final class QuestDbDatabaseManager {
 
         try (
             final CairoEngine engine = new CairoEngine(configuration);
-            final SqlCompiler compiler = new SqlCompiler(engine)
+            final SqlCompiler compiler = new QuestDbContext(engine).getCompiler()
         ) {
-            final SqlExecutionContext context = new SqlExecutionContextImpl(engine, 1);
+            final SqlExecutionContext context = new SqlExecutionContextImpl(engine, 1)
+                    .with(engine.getConfiguration().getFactoryProvider().getSecurityContextFactory().getRootContext(), null);
 
             // Node status tables
             compiler.compile(QuestDbQueries.CREATE_GARBAGE_COLLECTION_STATUS, context);
