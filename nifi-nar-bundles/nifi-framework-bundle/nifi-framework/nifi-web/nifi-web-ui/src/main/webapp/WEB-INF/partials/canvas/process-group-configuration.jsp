@@ -39,21 +39,6 @@
                                 </div>
                             </div>
                             <div class="setting">
-                                <div class="setting-name">Process group parameter context</div>
-                                <div class="editable setting-field">
-                                    <div id="process-group-parameter-context-combo"></div>
-                                    <div id="parameter-contexts-recursive-container">
-                                        <div id="parameter-contexts-recursive" class="nf-checkbox checkbox-unchecked"></div>
-                                        <div class="nf-checkbox-label">Apply recursively</div>
-                                        <div class="fa fa-question-circle" alt="Info" title="When checked Parameter Context will be applied to the Process Group and all the embedded Process Groups recursively, if the user has the proper permissions on all the respective components. If the user does not have the proper permissions on any embedded Process Group, then the Parameter Context will not be applied for any components."></div>
-                                    </div>
-                                    <div class="clear"></div>
-                                </div>
-                                <div class="read-only setting-field">
-                                    <span id="read-only-process-group-parameter-context" class="unset">Unauthorized</span>
-                                </div>
-                            </div>
-                            <div class="setting">
                                 <div class="setting-name">Execution Engine</div>
                                 <div class="editable setting-field">
                                     <div id="process-group-execution-engine-combo"></div>
@@ -98,6 +83,21 @@
                                 </div>
                                 <div class="read-only setting-field">
                                     <span id="read-only-process-group-outbound-policy" class="unset"></span>
+                                </div>
+                            </div>
+                            <div class="setting">
+                                <div class="setting-name">Process group parameter context</div>
+                                <div class="editable setting-field">
+                                    <div id="process-group-parameter-context-combo"></div>
+                                    <div id="parameter-contexts-recursive-container">
+                                        <div id="parameter-contexts-recursive" class="nf-checkbox checkbox-unchecked"></div>
+                                        <div class="nf-checkbox-label">Apply recursively</div>
+                                        <div class="fa fa-question-circle" alt="Info" title="When checked Parameter Context will be applied to the Process Group and all the embedded Process Groups recursively, if the user has the proper permissions on all the respective components. If the user does not have the proper permissions on any embedded Process Group, then the Parameter Context will not be applied for any components."></div>
+                                    </div>
+                                    <div class="clear"></div>
+                                </div>
+                                <div class="read-only setting-field">
+                                    <span id="read-only-process-group-parameter-context" class="unset">Unauthorized</span>
                                 </div>
                             </div>
                         </div>
