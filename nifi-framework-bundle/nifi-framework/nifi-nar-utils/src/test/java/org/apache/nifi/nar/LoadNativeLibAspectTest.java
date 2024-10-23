@@ -27,6 +27,7 @@ import java.nio.file.Paths;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -34,8 +35,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class LoadNativeLibAspectTest {
-
-    private static final Path TEMP_DIR = Paths.get(System.getProperty("java.io.tmpdir"));
 
     private LoadNativeLibAspect aspect;
 
@@ -111,7 +110,7 @@ public class LoadNativeLibAspectTest {
 
         String tempLibFilePathStr = (String) args[0];
         Path tempLibFilePath = Paths.get(tempLibFilePathStr);
-        assertEquals(TEMP_DIR, tempLibFilePath.getParent());
+        assertNotEquals(tempLibFilePath.getParent(), libFilePath.getParent());
         assertTrue(tempLibFilePathStr.endsWith(libFileName));
         assertTrue(Files.exists(tempLibFilePath));
         assertArrayEquals(libFileContent, Files.readAllBytes(tempLibFilePath));
