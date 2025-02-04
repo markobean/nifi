@@ -18,6 +18,7 @@ package org.apache.nifi.flowanalysis.rules;
 
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
+import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.ValidationContext;
 import org.apache.nifi.components.ValidationResult;
@@ -42,45 +43,50 @@ import java.util.List;
         + "all connections which have load balancing enabled.")
 public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
 
-    static final String CONFIGURE_STRATEGY_ERROR_MESSAGE = "at least one load balance strategy property must be set to 'true'";
+    static final String ALLOW_VALUE = "allow";
+    static final String DISALLOW_VALUE = "disallow";
+    static final AllowableValue ALLOW = new AllowableValue(ALLOW_VALUE, "Allow", "Allow connections to load balance");
+    static final AllowableValue DISALLOW = new AllowableValue(DISALLOW_VALUE, "Disallow", "Do not allow connections to load balance");
+    static final String CONFIGURE_STRATEGY_ERROR_MESSAGE = "is set so at least one load balance strategy property must be set to 'true'";
     static final String COMPRESSION_CONFIGURATION_ERROR_MESSAGE =
             "there is no compression configuration for content only without including attributes. If content compression is allowed, attribute compression must also be allowed.";
 
-    public static final PropertyDescriptor ALLOW_DO_NOT_LOAD_BALANCE = new PropertyDescriptor.Builder()
-            .name("Allow 'Do not load balance' Strategy")
-            .description("If set to true, connections may be configured with the load balancing strategy of 'Do not load balance'. This is the default "
-                    + "setting for new connections.")
+    public static final PropertyDescriptor LOAD_BALANCING_POLICY = new PropertyDescriptor.Builder()
+            .name("Load Balancing Policy")
+            .description("Determines whether any load balance strategy is allowed. If set to 'Disallow', the only allowed strategy is 'Do not load balance'.")
             .required(true)
-            .allowableValues("true", "false")
-            .defaultValue("true")
-            .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
+            .allowableValues(ALLOW, DISALLOW)
+            .defaultValue(DISALLOW.getValue())
             .build();
 
     public static final PropertyDescriptor ALLOW_PARTITION = new PropertyDescriptor.Builder()
-            .name("Allow 'Partition by attribute' Strategy")
+            .name("Allow Partition By Attribute Strategy")
             .description("If set to true, connections may be configured with the load balancing strategy of 'Partition by attribute'.")
-            .required(true)
+            .required(false)
             .allowableValues("true", "false")
             .defaultValue("false")
             .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
+            .dependsOn(LOAD_BALANCING_POLICY, ALLOW_VALUE)
             .build();
 
     public static final PropertyDescriptor ALLOW_ROUND_ROBIN = new PropertyDescriptor.Builder()
-            .name("Allow 'Round robin' Strategy")
+            .name("Allow Round Robin Strategy")
             .description("If set to true, connections may be configured with the load balancing strategy of 'Round robin'.")
-            .required(true)
+            .required(false)
             .allowableValues("true", "false")
             .defaultValue("false")
             .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
+            .dependsOn(LOAD_BALANCING_POLICY, ALLOW_VALUE)
             .build();
 
     public static final PropertyDescriptor ALLOW_SINGLE_NODE = new PropertyDescriptor.Builder()
-            .name("Allow 'Single node' Strategy")
+            .name("Allow Single Node Strategy")
             .description("If set to true, connections may be configured with the load balancing strategy of 'Single node'.")
-            .required(true)
+            .required(false)
             .allowableValues("true", "false")
             .defaultValue("false")
             .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
+            .dependsOn(LOAD_BALANCING_POLICY, ALLOW_VALUE)
             .build();
 
     public static final PropertyDescriptor ALLOW_ATTRIBUTE_COMPRESSION = new PropertyDescriptor.Builder()
@@ -91,6 +97,7 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
             .allowableValues("true", "false")
             .defaultValue("true")
             .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
+            .dependsOn(LOAD_BALANCING_POLICY, ALLOW_VALUE)
             .build();
     public static final PropertyDescriptor ALLOW_CONTENT_COMPRESSION = new PropertyDescriptor.Builder()
             .name("Allow Content Compression")
@@ -101,10 +108,11 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
             .allowableValues("true", "false")
             .defaultValue("true")
             .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
+            .dependsOn(LOAD_BALANCING_POLICY, ALLOW_VALUE)
             .build();
 
     private static final List<PropertyDescriptor> PROPERTY_DESCRIPTORS = List.of(
-            ALLOW_DO_NOT_LOAD_BALANCE,
+            LOAD_BALANCING_POLICY,
             ALLOW_PARTITION,
             ALLOW_ROUND_ROBIN,
             ALLOW_SINGLE_NODE,
@@ -121,11 +129,11 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
     protected Collection<ValidationResult> customValidate(ValidationContext validationContext) {
         final List<ValidationResult> results = new ArrayList<>();
 
-        // For this flow analysis rule to be valid, at least one load balancing strategy must be allowed
-        if (!validationContext.getProperty(ALLOW_DO_NOT_LOAD_BALANCE).asBoolean()
-                && !isLoadBalancingAllowed(validationContext)) {
+        // For this flow analysis rule to be valid, load balancing must be disabled, or at least one load balancing strategy must be allowed
+        if (validationContext.getProperty(LOAD_BALANCING_POLICY).getValue().equals(ALLOW.getValue())
+                && !isLoadBalancingStrategyConfigured(validationContext)) {
             results.add(new ValidationResult.Builder()
-                    .subject("Load Balance Strategy Properties")
+                    .subject("Load Balance Policy")
                     .valid(false)
                     .explanation(CONFIGURE_STRATEGY_ERROR_MESSAGE)
                     .build());
@@ -136,7 +144,7 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
         // It is also valid to have only attribute compression or no compression at all allowed.
         // In addition, this is only relevant if a load balance strategy is allowed, i.e. if the only allowed strategy is "Do not load balance",
         // then any combination of compression is allowed because it will be ignored.
-        if (isLoadBalancingAllowed(validationContext)
+        if (validationContext.getProperty(LOAD_BALANCING_POLICY).getValue().equals(ALLOW.getValue())
                 && validationContext.getProperty(ALLOW_CONTENT_COMPRESSION).asBoolean()
                 && !validationContext.getProperty(ALLOW_ATTRIBUTE_COMPRESSION).asBoolean()) {
             results.add(new ValidationResult.Builder()
@@ -152,7 +160,7 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
     @Override
     public Collection<GroupAnalysisResult> analyzeProcessGroup(VersionedProcessGroup processGroup, FlowAnalysisRuleContext context) {
         final Collection<ConnectionViolation> violations = new ArrayList<>();
-        final boolean allowNone = context.getProperty(ALLOW_DO_NOT_LOAD_BALANCE).asBoolean();
+        final boolean allowLoadBalancing = context.getProperty(LOAD_BALANCING_POLICY).getValue().equals(ALLOW.getValue());
         final boolean allowPartition = context.getProperty(ALLOW_PARTITION).asBoolean();
         final boolean allowRoundRobin = context.getProperty(ALLOW_ROUND_ROBIN).asBoolean();
         final boolean allowSingleNode = context.getProperty(ALLOW_SINGLE_NODE).asBoolean();
@@ -162,13 +170,21 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
         processGroup.getConnections().forEach(connection -> {
             final String strategy = connection.getLoadBalanceStrategy();
 
-            if (LoadBalanceStrategy.DO_NOT_LOAD_BALANCE.name().equals(strategy) && !allowNone) {
-                violations.add(new ConnectionViolation(connection,
-                        LoadBalanceViolationType.DO_NOT_LOAD_BALANCE_DISALLOWED,
-                        this.getClass().getSimpleName(),
-                        connection.getLoadBalanceStrategy(),
-                        context.getProperty(ALLOW_DO_NOT_LOAD_BALANCE).getValue()));
-            }
+            // TODO: do not load balance is always allowed; no need to check
+//            if (LoadBalanceStrategy.DO_NOT_LOAD_BALANCE.name().equals(strategy) && allowLoadBalancing) {
+//                violations.add(new ConnectionViolation(connection,
+//                        LoadBalanceViolationType.DO_NOT_LOAD_BALANCE_DISALLOWED,
+//                        this.getClass().getSimpleName(),
+//                        connection.getLoadBalanceStrategy(),
+//                        context.getProperty(ALLOW_DO_NOT_LOAD_BALANCE).getValue()));
+//            }
+//            if (LoadBalanceStrategy.DO_NOT_LOAD_BALANCE.name().equals(strategy) && !allowNone) {
+//                violations.add(new ConnectionViolation(connection,
+//                        LoadBalanceViolationType.DO_NOT_LOAD_BALANCE_DISALLOWED,
+//                        this.getClass().getSimpleName(),
+//                        connection.getLoadBalanceStrategy(),
+//                        context.getProperty(ALLOW_DO_NOT_LOAD_BALANCE).getValue()));
+//            }
             if (LoadBalanceStrategy.PARTITION_BY_ATTRIBUTE.name().equals(strategy) && !allowPartition) {
                 violations.add(new ConnectionViolation(connection,
                         LoadBalanceViolationType.PARTITION_DISALLOWED,
@@ -217,7 +233,7 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
         return FlowAnalysisRuleUtils.convertToGroupAnalysisResults(processGroup, violations);
     }
 
-    private boolean isLoadBalancingAllowed(ValidationContext validationContext) {
+    private boolean isLoadBalancingStrategyConfigured(ValidationContext validationContext) {
         return validationContext.getProperty(ALLOW_PARTITION).asBoolean()
                 || validationContext.getProperty(ALLOW_ROUND_ROBIN).asBoolean()
                 || validationContext.getProperty(ALLOW_SINGLE_NODE).asBoolean();
@@ -231,7 +247,7 @@ public class RestrictLoadBalancing extends AbstractFlowAnalysisRule {
 
     private enum LoadBalanceViolationType implements ViolationType {
 
-        DO_NOT_LOAD_BALANCE_DISALLOWED("NoLoadBalanceNotAllowed", "Load Balance Strategy", "is disallowed because \"" + ALLOW_DO_NOT_LOAD_BALANCE.getName() + "\" is set to "),
+//        DO_NOT_LOAD_BALANCE_DISALLOWED("NoLoadBalanceNotAllowed", "Load Balance Strategy", "is disallowed because \"" + ALLOW_DO_NOT_LOAD_BALANCE.getName() + "\" is set to "),
         PARTITION_DISALLOWED("PartitionByAttributeNotAllowed", "Load Balance Strategy", "is disallowed because \"" + ALLOW_PARTITION.getName() + "\" is set to "),
         ROUND_ROBIN_DISALLOWED("RoundRobinNotAllowed", "Load Balance Strategy", "is disallowed because \"" + ALLOW_ROUND_ROBIN.getName() + "\" is set to "),
         SINGLE_NODE_DISALLOWED("SingleNodeNotAllowed", "Load Balance Strategy", "is disallowed because \"" + ALLOW_SINGLE_NODE.getName() + "\" is set to "),

@@ -45,8 +45,9 @@ public class RestrictLoadBalancingTest extends AbstractFlowAnalaysisRuleTest<Res
     @Override
     public void setup() {
         super.setup();
+        // Non-default setting, but appropriate for unit tests
+        setProperty(RestrictLoadBalancing.LOAD_BALANCING_POLICY, "allow");
         // Default settings
-        setProperty(RestrictLoadBalancing.ALLOW_DO_NOT_LOAD_BALANCE, "true");
         setProperty(RestrictLoadBalancing.ALLOW_PARTITION, "false");
         setProperty(RestrictLoadBalancing.ALLOW_ROUND_ROBIN, "false");
         setProperty(RestrictLoadBalancing.ALLOW_SINGLE_NODE, "false");
@@ -57,7 +58,7 @@ public class RestrictLoadBalancingTest extends AbstractFlowAnalaysisRuleTest<Res
     @Test
     public void testBadConfiguration() {
         // Set all load balancing strategies to 'false'
-        setProperty(RestrictLoadBalancing.ALLOW_DO_NOT_LOAD_BALANCE, "false");
+//        setProperty(RestrictLoadBalancing.LOAD_BALANCING_POLICY, "allow");
         ArrayList<ValidationResult> validationErrors = new ArrayList<>(rule.customValidate(validationContext));
         assertEquals(1, validationErrors.size());
         assertTrue(validationErrors.getFirst().getExplanation().contains(RestrictLoadBalancing.CONFIGURE_STRATEGY_ERROR_MESSAGE));
@@ -74,7 +75,9 @@ public class RestrictLoadBalancingTest extends AbstractFlowAnalaysisRuleTest<Res
     public void testGoodConfiguration() {
         // Set attribute compression to false while content compression is true (and no load balancing strategy is allowed)
         // This is a violation only if some form of load balancing is allowed
+        setProperty(RestrictLoadBalancing.LOAD_BALANCING_POLICY, "disallow");
         setProperty(RestrictLoadBalancing.ALLOW_ATTRIBUTE_COMPRESSION, "false");
+        setProperty(RestrictLoadBalancing.ALLOW_SINGLE_NODE, "true");
         ArrayList<ValidationResult> validationErrors = new ArrayList<>(rule.customValidate(validationContext));
         assertEquals(0, validationErrors.size());
     }
@@ -92,15 +95,13 @@ public class RestrictLoadBalancingTest extends AbstractFlowAnalaysisRuleTest<Res
 
     @Test
     public void testAnyLoadBalanceStrategy() throws Exception {
-        setProperty(RestrictLoadBalancing.ALLOW_DO_NOT_LOAD_BALANCE, "false");
+        setProperty(RestrictLoadBalancing.LOAD_BALANCING_POLICY, RestrictLoadBalancing.ALLOW.getValue());
         setProperty(RestrictLoadBalancing.ALLOW_PARTITION, "true");
         setProperty(RestrictLoadBalancing.ALLOW_ROUND_ROBIN, "true");
         setProperty(RestrictLoadBalancing.ALLOW_SINGLE_NODE, "true");
         testAnalyzeProcessGroup(
                 "src/test/resources/RestrictLoadBalancing/RestrictLoadBalancing.json",
-                List.of(
-                        UPSTREAM_PROCESSOR_DO_NOT_LOAD_BALANCE_UUID
-                )
+                List.of()
         );
     }
 
