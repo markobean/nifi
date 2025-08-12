@@ -96,6 +96,26 @@ public class EmbeddedQuestDbStatusHistoryRepositoryForComponentsTest extends Abs
         assertEquals(new Date(INSERTED_AT.getTime() - TimeUnit.MINUTES.toMillis(5)), result.getStatusSnapshots().get(2).getTimestamp());
     }
 
+    @Test
+    public void testReadingLimitedByTime() throws Exception {
+        // Observe status history returned does not include time beyond DAYS_TO_KEEP limit
+        repository.capture(new NodeStatus(), givenSimpleRootProcessGroupStatus(), new ArrayList<>(), new Date(INSERTED_AT.getTime() - TimeUnit.DAYS.toMillis(DAYS_TO_KEEP_DATA)));
+        // Observe status history returned includes time greater than (and less than) 24 hours
+        repository.capture(new NodeStatus(), givenSimpleRootProcessGroupStatus(), new ArrayList<>(), new Date(INSERTED_AT.getTime() - TimeUnit.HOURS.toMillis(25)));
+        repository.capture(new NodeStatus(), givenSimpleRootProcessGroupStatus(), new ArrayList<>(), new Date(INSERTED_AT.getTime() - TimeUnit.HOURS.toMillis(24)));
+        repository.capture(new NodeStatus(), givenSimpleRootProcessGroupStatus(), new ArrayList<>(), new Date(INSERTED_AT.getTime() - TimeUnit.HOURS.toMillis(23)));
+        waitUntilPersisted();
+
+        Date statusStartDate = new Date(NOW - TimeUnit.DAYS.toMillis(DAYS_TO_KEEP_DATA));
+        final StatusHistory result = repository.getProcessGroupStatusHistory(ROOT_GROUP_ID, statusStartDate, END, PREFERRED_DATA_POINTS);
+
+        // in case the value of preferred data points are lower than the number of snapshots available, the latest will added to the result
+        assertEquals(3, result.getStatusSnapshots().size());
+        assertEquals(new Date(INSERTED_AT.getTime() - TimeUnit.HOURS.toMillis(25)), result.getStatusSnapshots().get(0).getTimestamp());
+        assertEquals(new Date(INSERTED_AT.getTime() - TimeUnit.HOURS.toMillis(24)), result.getStatusSnapshots().get(1).getTimestamp());
+        assertEquals(new Date(INSERTED_AT.getTime() - TimeUnit.HOURS.toMillis(23)), result.getStatusSnapshots().get(2).getTimestamp());
+    }
+
     private void assertCorrectStatusHistory(final StatusHistory rootGroupStatus, final String id, final String name) {
         assertEquals(id, rootGroupStatus.getComponentDetails().get("Id"));
         assertEquals(name, rootGroupStatus.getComponentDetails().get("Name"));

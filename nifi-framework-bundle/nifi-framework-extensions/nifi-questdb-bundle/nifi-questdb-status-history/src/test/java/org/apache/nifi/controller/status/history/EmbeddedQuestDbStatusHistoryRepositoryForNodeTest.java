@@ -19,6 +19,9 @@ package org.apache.nifi.controller.status.history;
 import org.apache.nifi.controller.status.ProcessGroupStatus;
 import org.junit.jupiter.api.Test;
 
+import java.util.Date;
+import java.util.concurrent.TimeUnit;
+
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class EmbeddedQuestDbStatusHistoryRepositoryForNodeTest extends AbstractEmbeddedQuestDbStatusHistoryRepositoryTest {
@@ -48,6 +51,23 @@ public class EmbeddedQuestDbStatusHistoryRepositoryForNodeTest extends AbstractE
         final GarbageCollectionHistory garbageCollectionHistory = repository.getGarbageCollectionHistory(START, END);
         assertGc1Status(garbageCollectionHistory.getGarbageCollectionStatuses("gc1"));
         assertGc2Status(garbageCollectionHistory.getGarbageCollectionStatuses("gc2"));
+    }
+
+    @Test
+    public void testWritingThenReadingWithTimeLimit() throws Exception {
+        final ProcessGroupStatus processGroupStatus = getProcessGroupStatus();
+
+        Date insertedDate = new Date(NOW - TimeUnit.DAYS.toMillis(DAYS_TO_KEEP_DATA));
+        repository.capture(givenNodeStatus(), processGroupStatus, givenGarbageCollectionStatuses(insertedDate), insertedDate);
+        waitUntilPersisted();
+
+        final StatusHistory nodeStatusHistory = repository.getNodeStatusHistory(insertedDate, END);
+        assertNodeStatusHistory(nodeStatusHistory.getStatusSnapshots().get(0));
+
+        Date dateLimit = new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(DAYS_TO_KEEP_DATA));
+        final GarbageCollectionHistory garbageCollectionHistory = repository.getGarbageCollectionHistory(dateLimit, END);
+        assertTrue(garbageCollectionHistory.getGarbageCollectionStatuses("gc1").isEmpty());
+        assertTrue(garbageCollectionHistory.getGarbageCollectionStatuses("gc2").isEmpty());
     }
 
     private static ProcessGroupStatus getProcessGroupStatus() {

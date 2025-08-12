@@ -173,11 +173,6 @@ final class QuestDbStatusHistoryStorage implements StatusHistoryStorage {
         }
     }
 
-//    private static String getStartTime(final Date start) {
-//        final Instant startTime = (start == null) ? Instant.now().minus(1, ChronoUnit.DAYS) : start.toInstant();
-//        return EmbeddedQuestDbStatusHistoryRepositoryDefinitions.DATE_FORMATTER.format(startTime);
-//    }
-
     private String getStartTimeForNode(final Date start) {
         final Instant startTime = (start == null) ? Instant.now().minus(configuredNodeDays, ChronoUnit.DAYS) : start.toInstant();
         return EmbeddedQuestDbStatusHistoryRepositoryDefinitions.DATE_FORMATTER.format(startTime);
