@@ -280,19 +280,31 @@ export class CanvasContextMenu implements ContextMenuDefinitionProvider {
         menuItems: [
             {
                 condition: (selection: any) => {
-                    // TODO - hasUpstream
-                    return false;
+                    return this.canvasUtils.hasUpstream(selection);
                 },
                 clazz: 'icon',
                 text: 'Upstream',
-                action: () => {
+                action: (selection: any) => {
                     // TODO - showUpstream
+                    const selectionData = selection.datum();
+                    this.store.dispatch(
+                        FlowActions.openConnectionsDialogRequest({
+                            request: {
+                                direction: 'UPSTREAM',
+                                componentId: selectionData.id,
+                                componentType: selectionData.type,
+                                // Provide current PG so the dialog can resolve upstream connections
+                                // that may reside in the parent process group.
+                                currentProcessGroupId: this.canvasUtils.getProcessGroupId()
+                            }
+                        })
+                    );
+
                 }
             },
             {
                 condition: (selection: any) => {
-                    // TODO - hasDownstream
-                    return false;
+                    return this.canvasUtils.hasDownstream(selection);
                 },
                 clazz: 'icon',
                 text: 'Downstream',

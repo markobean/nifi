@@ -157,7 +157,7 @@ export class CanvasUtils {
     }
 
     public hasUpstream(selection: any): boolean {
-        // ensure the correct number of components are selected
+        // ensure exactly one component is selected
         if (selection.size() !== 1) {
             return false;
         }
@@ -170,6 +170,24 @@ export class CanvasUtils {
             this.isOutputPort(selection) ||
             (this.isInputPort(selection) && this.parentProcessGroupId !== null)
         );
+
+        // // do not consider a connection as a candidate
+        // if (this.isConnection(selection)) {
+        //     return false;
+        // }
+        //
+        // // determine the selected component id
+        // const selectedDatum = selection.datum();
+        // if (!selectedDatum || !selectedDatum.id) {
+        //     return false;
+        // }
+        // const selectedId: string = selectedDatum.id;
+        //
+        // // true if there exists any connection whose resolved destination component id
+        // // equals the selected component id (i.e., an upstream connection is present)
+        // return this.connections?.some((connection: any) => {
+        //     return this.getConnectionDestinationComponentId(connection) === selectedId;
+        // }) ?? false;
     }
 
     /**
