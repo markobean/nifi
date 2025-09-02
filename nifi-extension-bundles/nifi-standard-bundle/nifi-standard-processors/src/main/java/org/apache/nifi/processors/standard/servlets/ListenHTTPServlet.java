@@ -28,6 +28,7 @@ import jakarta.servlet.http.Part;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.core.MediaType;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.output.TeeOutputStream;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Strings;
 import org.apache.nifi.flowfile.FlowFile;
@@ -50,6 +51,7 @@ import org.apache.nifi.serialization.RecordSetWriter;
 import org.apache.nifi.serialization.RecordSetWriterFactory;
 import org.apache.nifi.serialization.record.RecordSet;
 import org.apache.nifi.stream.io.StreamUtils;
+import org.apache.nifi.util.FlowFilePackagerV3;
 import org.apache.nifi.util.FlowFileUnpackager;
 import org.apache.nifi.util.FlowFileUnpackagerV1;
 import org.apache.nifi.util.FlowFileUnpackagerV2;
@@ -64,6 +66,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -322,15 +325,89 @@ public class ListenHTTPServlet extends HttpServlet {
         return session.putAllAttributes(flowFile, attributes);
     }
 
-    private Set<FlowFile> handleRequest(final HttpServletRequest request, final ProcessSession session, String foundSubject, String foundIssuer,
-                                        final boolean destinationIsLegacyNiFi, final String contentType, final InputStream in) throws IOException {
-        FlowFile flowFile;
+    private Set<FlowFile> handleFFv3Request(final HttpServletRequest request, final ProcessSession session, String foundSubject, String foundIssuer,
+                                        final boolean destinationIsLegacyNiFi, final String contentType, final InputStream in, FlowFileUnpackager unpackager) throws IOException {
+//        FlowFile flowFile;
         final AtomicBoolean hasMoreData = new AtomicBoolean(false);
-        final FlowFileUnpackager unpackager = getFlowFileUnpackager(contentType);
 
         final Set<FlowFile> flowFileSet = new HashSet<>();
+        FlowFile uberFlowFile = session.create();
 
+        final String details = String.format("Remote DN=%s, Issuer DN=%s", foundSubject, foundIssuer);
+        final AtomicReference<String> uberSourceSystemFlowFileIdentifier = new AtomicReference<>();
+        final AtomicLong uberTransferMillis = new AtomicLong(0);
+
+        uberFlowFile = session.write(uberFlowFile, outUber -> {
         do {
+            final long startNanos = System.nanoTime();
+            final Map<String, String> attributes = new HashMap<>();
+            FlowFile flowFile = session.create();
+
+            final OutputStream out = session.write(flowFile);
+            final OutputStream tee = new TeeOutputStream(outUber, out);
+
+            try (final BufferedOutputStream bos = new BufferedOutputStream(tee, 65536)) {
+//                if (unpackager == null) {
+//                    if (isRecordProcessing()) {
+//                        processRecord(in, flowFile, out);
+//                    } else {
+//                        IOUtils.copy(in, bos);
+//                        hasMoreData.set(false);
+//                    }
+//                } else {
+                    attributes.putAll(unpackager.unpackageFlowFile(in, bos));
+                    hasMoreData.set(unpackager.hasMoreData());
+//                }
+            }
+
+
+            final long transferNanos = System.nanoTime() - startNanos;
+            final long transferMillis = TimeUnit.MILLISECONDS.convert(transferNanos, TimeUnit.NANOSECONDS);
+            uberTransferMillis.set(transferMillis);
+
+            // put metadata on flowfile
+            final String nameVal = request.getHeader(CoreAttributes.FILENAME.key());
+            final String packagedFlowFileName = attributes.get(CoreAttributes.FILENAME.key());
+            // Favor filename extracted from unpackager over filename in header
+            if (StringUtils.isBlank(packagedFlowFileName) && StringUtils.isNotBlank(nameVal)) {
+                attributes.put(CoreAttributes.FILENAME.key(), nameVal);
+            }
+
+            String sourceSystemFlowFileIdentifier = attributes.remove(CoreAttributes.UUID.key());
+            if (sourceSystemFlowFileIdentifier != null) {
+                sourceSystemFlowFileIdentifier = "urn:nifi:" + sourceSystemFlowFileIdentifier; //NOPMD
+                if (uberSourceSystemFlowFileIdentifier.get().isBlank()) {
+                    uberSourceSystemFlowFileIdentifier.set(sourceSystemFlowFileIdentifier);
+                }
+            }
+
+            flowFile = session.putAllAttributes(flowFile, attributes);
+            flowFile = saveRequestDetailsAsAttributes(request, session, foundSubject, foundIssuer, flowFile);
+//            final String details = String.format("Remote DN=%s, Issuer DN=%s", foundSubject, foundIssuer);
+            // Report provenance event(s) based on receiving a FlowFile package or individual FlowFile/data
+//            session.getProvenanceReporter().receive(flowFile, request.getRequestURL().toString(), sourceSystemFlowFileIdentifier, details, transferMillis);
+            flowFileSet.add(flowFile);
+
+        } while (hasMoreData.get());
+        });
+        session.getProvenanceReporter().receive(uberFlowFile, request.getRequestURL().toString(), uberSourceSystemFlowFileIdentifier.get(), details, uberTransferMillis.get());
+        session.getProvenanceReporter().fork(uberFlowFile, flowFileSet);
+        return flowFileSet;
+    }
+
+    private Set<FlowFile> handleRequest(final HttpServletRequest request, final ProcessSession session, String foundSubject, String foundIssuer,
+                                        final boolean destinationIsLegacyNiFi, final String contentType, final InputStream in) throws IOException {
+        final FlowFileUnpackager unpackager = getFlowFileUnpackager(contentType);
+        // TODO: Think about calling a separate method for FFv3 unpackager
+        if (unpackager instanceof FlowFilePackagerV3) {
+            return handleFFv3Request(request, session, foundSubject, foundIssuer, destinationIsLegacyNiFi, contentType, in, unpackager);
+        }
+
+        FlowFile flowFile;
+        final AtomicBoolean hasMoreData = new AtomicBoolean(false);
+//        final Set<FlowFile> flowFileSet = new HashSet<>();
+
+//        do {
             final long startNanos = System.nanoTime();
             final Map<String, String> attributes = new HashMap<>();
             flowFile = session.create();
@@ -338,18 +415,18 @@ public class ListenHTTPServlet extends HttpServlet {
             final OutputStream out = session.write(flowFile);
 
             try (final BufferedOutputStream bos = new BufferedOutputStream(out, 65536)) {
-                if (unpackager == null) {
+//                if (unpackager == null) {
                     if (isRecordProcessing()) {
                         processRecord(in, flowFile, out);
                     } else {
                         IOUtils.copy(in, bos);
                         hasMoreData.set(false);
                     }
-                } else {
-                    attributes.putAll(unpackager.unpackageFlowFile(in, bos));
-
-                    hasMoreData.set(unpackager.hasMoreData());
-                }
+//                } else {
+//                    attributes.putAll(unpackager.unpackageFlowFile(in, bos));
+//
+//                    hasMoreData.set(unpackager.hasMoreData());
+//                }
             }
 
 
@@ -358,8 +435,9 @@ public class ListenHTTPServlet extends HttpServlet {
 
             // put metadata on flowfile
             final String nameVal = request.getHeader(CoreAttributes.FILENAME.key());
+            final String packagedFlowFileName = attributes.get(CoreAttributes.FILENAME.key());
             // Favor filename extracted from unpackager over filename in header
-            if (StringUtils.isBlank(attributes.get(CoreAttributes.FILENAME.key())) && StringUtils.isNotBlank(nameVal)) {
+            if (StringUtils.isBlank(packagedFlowFileName) && StringUtils.isNotBlank(nameVal)) {
                 attributes.put(CoreAttributes.FILENAME.key(), nameVal);
             }
 
@@ -372,10 +450,11 @@ public class ListenHTTPServlet extends HttpServlet {
             flowFile = saveRequestDetailsAsAttributes(request, session, foundSubject, foundIssuer, flowFile);
             final String details = String.format("Remote DN=%s, Issuer DN=%s", foundSubject, foundIssuer);
             session.getProvenanceReporter().receive(flowFile, request.getRequestURL().toString(), sourceSystemFlowFileIdentifier, details, transferMillis);
-            flowFileSet.add(flowFile);
 
-        } while (hasMoreData.get());
-        return flowFileSet;
+//            flowFileSet.add(flowFile);
+
+//        } while (hasMoreData.get());
+        return Collections.singleton(flowFile);
     }
 
     protected void proceedFlow(final HttpServletRequest request, final HttpServletResponse response,
