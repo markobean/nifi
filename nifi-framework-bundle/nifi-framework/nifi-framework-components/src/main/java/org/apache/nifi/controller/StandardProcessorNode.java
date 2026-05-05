@@ -1843,7 +1843,9 @@ public class StandardProcessorNode extends ProcessorNode implements Connectable 
         addStopFuture(future);
 
         // will ensure that the Processor represented by this node can only be stopped once
-        if (this.scheduledState.compareAndSet(ScheduledState.RUNNING, ScheduledState.STOPPING) || this.scheduledState.compareAndSet(ScheduledState.RUN_ONCE, ScheduledState.STOPPING)) {
+        if (this.scheduledState.compareAndSet(ScheduledState.RUNNING, ScheduledState.STOPPING)
+                || this.scheduledState.compareAndSet(ScheduledState.RUN_ONCE, ScheduledState.STOPPING)
+                || this.scheduledState.compareAndSet(ScheduledState.STARTING, ScheduledState.STOPPING)) {
             if (!lifecycleMethods.isTriggerOnUnscheduled() && !lifecycleMethods.isTriggerOnStopped()) {
                 // If we do not need to trigger either of the lifecycle methods, we can simply call the complete action and be done
                 completeStopAction();

@@ -513,7 +513,8 @@ export class EditProcessor extends TabbedDialog {
     }
 
     isStoppable(): boolean {
-        return this.status.aggregateSnapshot.runStatus === 'Running';
+        return this.status.aggregateSnapshot.runStatus === 'Running'
+            || this.status.aggregateSnapshot.runStatus === 'Starting';
     }
 
     isStopping(): boolean {
