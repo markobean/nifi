@@ -56,7 +56,7 @@
                 }
             </form>
             <div class="flex gap-x-1">
-                @if (flowFilePolicy === 'USE_ORIGINAL' && !reorderDisabled()) {
+                @if (!reorderDisabled()) {
                     <div class="flex gap-x-2 items-center">
                         <div>Reorder rules</div>
                         <mat-slide-toggle
@@ -77,7 +77,10 @@
         </div>
         @if (!newRule && rulesList.length > 0) {
             <div class="tertiary-color font-medium">
-                Displaying {{ filteredRulesList.length }} of {{ rulesList.length }}
+                Displaying123 .... {{ filteredRulesList.length }} of {{ rulesList.length }}
+                <!-- TODO: should be <span> -->
+                <div>Expand All</div>
+                <div>Collapse All</div>
             </div>
         }
 
